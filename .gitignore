@@ -1,0 +1,9 @@
+# =========================
+# Deep Learning & Weights
+# =========================
+*.pth
+*.pt
+*.ckpt
+*.h5
+*.safetensors
+*.onnx
