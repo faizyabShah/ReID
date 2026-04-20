@@ -14,6 +14,31 @@ from processor.part_attention_vit_processor import do_inference as do_inf_pat
 
 #from torch.backends import cudnn
 
+def read_classes_from_csv(csv_path):
+    """Reads the CSV and returns a list of classes in order."""
+    classes = []
+    with open(csv_path, 'r') as f:
+        reader = csv.reader(f)
+        next(reader)  # Skip the header (cameraID, imageName, Class)
+        for row in reader:
+            classes.append(row[2])  # The Class is the 3rd column
+    return classes
+
+def apply_class_penalty(dist_mat, query_classes, gallery_classes):
+    """Applies a huge penalty to the distance matrix for mismatched classes."""
+    # Convert lists to numpy arrays and reshape for broadcasting
+    q_classes = np.array(query_classes)[:, np.newaxis]  # Shape: (num_query, 1)
+    g_classes = np.array(gallery_classes)[np.newaxis, :]  # Shape: (1, num_gallery)
+    
+    # Create a boolean mask (True where classes do NOT match)
+    mismatch_mask = (q_classes != g_classes)
+    
+    # Add a massive penalty to the mismatched pairs
+    penalized_dist = np.copy(dist_mat)
+    penalized_dist[mismatch_mask] += 1e6
+    
+    return penalized_dist
+
 def extract_feature(model, dataloaders, num_query):
     features = []
     count = 0
@@ -97,6 +122,14 @@ if __name__ == "__main__":
     g_g_dist = np.dot(gf, np.transpose(gf))
 
     re_rank_dist = re_ranking(q_g_dist, q_q_dist, g_g_dist)
+
+    query_csv_path = "./Urban2026/query_classes.csv"
+    gallery_csv_path = "./Urban2026/test_classes.csv"
+    
+    query_classes = read_classes_from_csv(query_csv_path)
+    gallery_classes = read_classes_from_csv(gallery_csv_path)
+
+    re_rank_dist = apply_class_penalty(re_rank_dist, query_classes, gallery_classes)
 
     indices = np.argsort(re_rank_dist, axis=1)[:, :100]
 
