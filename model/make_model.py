@@ -277,6 +277,9 @@ class build_part_attention_vit(nn.Module):
         if self.pretrain_choice == 'imagenet':
             self.base.load_param(self.model_path)
             print('Loading pretrained ImageNet model......from {}'.format(self.model_path))
+        elif self.pretrain_choice == 'self':
+            print("Loading self-trained checkpoint")
+            self.load_param(self.model_path)
 
         self.bottleneck = nn.BatchNorm1d(self.in_planes)
         self.bottleneck.bias.requires_grad_(False)
@@ -300,11 +303,31 @@ class build_part_attention_vit(nn.Module):
 
     def load_param(self, trained_path):
         param_dict = torch.load(trained_path)
-        for i in param_dict:
-            if 'classifier' in i: # drop classifier
+
+        if 'model' in param_dict:
+            param_dict = param_dict['model']
+        elif 'state_dict' in param_dict:
+            param_dict = param_dict['state_dict']
+        
+        new_dict = {}
+
+        for k, v in param_dict.items():
+
+            if 'classifier' in k: # drop classifier
                 continue
-            self.state_dict()[i.replace('module.', '')].copy_(param_dict[i])
-        print('Loading trained model from {}'.format(trained_path))
+
+            #remove DDP prefix
+            k = k.replace('module.', '')
+
+            if k.startswith('base.'):
+                new_k = k
+            else:
+                new_k = 'base.' + k
+            new_dict[new_k] = v
+        
+        self.load_state_dict(new_dict, strict=False)
+
+        print('Loading pre-trained model from {}'.format(trained_path))
 
     def load_param_finetune(self, model_path):
         param_dict = torch.load(model_path)
