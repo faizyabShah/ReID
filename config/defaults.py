@@ -63,6 +63,9 @@ _C.MODEL.PATCH_EMBED_TYPE = ''
 # fixed patch embed or not
 _C.MODEL.FREEZE_PATCH_EMBED = True
 
+# number of object categories for query conditioning (trashbin/container/trafficsign/crosswalk)
+_C.MODEL.NUM_OBJECT_CLASSES = 4
+
 # part views
 _C.MODEL.PC_SCALE = 0.02
 _C.MODEL.PC_LOSS = True

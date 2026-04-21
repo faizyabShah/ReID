@@ -16,6 +16,8 @@ from .bases import ImageDataset
 from ..datasets import DATASET_REGISTRY
 @DATASET_REGISTRY.register()
 
+# maps object category name -> integer class id used for query conditioning
+_CLASS_MAP = {'Crosswalk': 0, 'Container': 1, 'Trashbin': 2, 'Trafficsign': 3}
 
 class UrbanElementsReID(ImageDataset):
 
@@ -50,7 +52,7 @@ class UrbanElementsReID(ImageDataset):
             raise RuntimeError("'{}' is not available".format(self.gallery_dir))
 
     def _readCSV_(self, csv_dir):
-        
+
         camids = []
         imageNames = []
         pids = []
@@ -61,8 +63,20 @@ class UrbanElementsReID(ImageDataset):
                 camids.append(row[0])
                 imageNames.append(str(row[1]))
                 pids.append(int(row[2]))
-        
+
         return list(zip(camids, imageNames, pids))
+
+    def _readCSV_with_class_(self, csv_dir):
+        camids, imageNames, pids, classes = [], [], [], []
+        with open(csv_dir, newline='') as csvfile:
+            reader = csv.reader(csvfile, delimiter=',')
+            next(reader)
+            for row in reader:
+                camids.append(row[0])
+                imageNames.append(str(row[1]))
+                pids.append(int(row[2]))
+                classes.append(row[3])
+        return list(zip(camids, imageNames, pids, classes))
     
     def _readCSV_eval_(self, csv_dir):
         camids = []
@@ -79,24 +93,34 @@ class UrbanElementsReID(ImageDataset):
         return list(zip(camids, imageNames, pids))
     
     def _process_dir(self, dir_path, relabel=False):
-        xml_dir = osp.join(self.dataset_dir, 'train.csv')
-        xml_file = self._readCSV_(xml_dir)
+        # prefer train_classes.csv (has object category) over plain train.csv
+        classes_csv = osp.join(self.dataset_dir, 'train_classes.csv')
+        plain_csv = osp.join(self.dataset_dir, 'train.csv')
+        has_classes = osp.exists(classes_csv)
+
+        if has_classes:
+            xml_file = self._readCSV_with_class_(classes_csv)
+            rows = [(camid, imageName, pid, cls) for camid, imageName, pid, cls in xml_file]
+        else:
+            raw = self._readCSV_(plain_csv)
+            rows = [(camid, imageName, pid, None) for camid, imageName, pid in raw]
 
         pid_container = set()
-
-        for _, _, pid in xml_file:
+        for _, _, pid, _ in rows:
             if pid == -1: continue
-            pid_container.add(pid)       
-        pid2label = {pid: label for label, pid in enumerate(pid_container)}
-        
-        dataset = []
+            pid_container.add(pid)
+        pid2label = {pid: label for label, pid in enumerate(sorted(pid_container))}
 
-        for camid, imageName, pid in xml_file:
+        dataset = []
+        for camid, imageName, pid, class_name in rows:
             camid = int(camid[1:])
             if pid == -1: continue
             if relabel: pid = pid2label[pid]
-            dataset.append((osp.join(dir_path, imageName), pid, camid))
-                
+            class_id = _CLASS_MAP.get(class_name, 0) if class_name is not None else 0
+            # store class_id and domains together so build_DG_dataloader does not overwrite others
+            dataset.append((osp.join(dir_path, imageName), pid, camid,
+                            {'class_id': class_id, 'domains': 0}))
+
         return dataset
     
     def _process_dir_test(self, dir_path, relabel=False, query=True):

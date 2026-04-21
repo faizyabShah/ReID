@@ -267,7 +267,8 @@ class build_part_attention_vit(nn.Module):
             drop_path_rate=cfg.MODEL.DROP_PATH,
             drop_rate= cfg.MODEL.DROP_OUT,
             attn_drop_rate=cfg.MODEL.ATT_DROP_RATE,
-            pretrain_tag=pretrain_tag)
+            pretrain_tag=pretrain_tag,
+            num_object_classes=cfg.MODEL.NUM_OBJECT_CLASSES)
         if cfg.MODEL.TRANSFORMER_TYPE == 'deit_small_patch16_224_TransReID':
             self.in_planes = 384
         elif cfg.MODEL.TRANSFORMER_TYPE == 'deit_tiny_patch16_224_TransReID':
@@ -287,8 +288,8 @@ class build_part_attention_vit(nn.Module):
         self.classifier = nn.Linear(self.in_planes, self.num_classes, bias=False)
         self.classifier.apply(weights_init_classifier)
 
-    def forward(self, x):
-        layerwise_tokens = self.base(x) # B, N, C
+    def forward(self, x, class_id=None):
+        layerwise_tokens = self.base(x, class_id=class_id) # B, N, C
         layerwise_cls_tokens = [t[:, 0] for t in layerwise_tokens] # cls token
         part_feat_list = layerwise_tokens[-1][:, 1: 4] # 3, 768
 
