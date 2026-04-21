@@ -49,6 +49,105 @@ def weights_init_classifier(m):
             nn.init.constant_(m.bias, 0.0)
 
 
+class QueryAdapter(nn.Module):
+    """
+    Query-Adaptive Feature Refinement Module
+    
+    This module refines feature representations by conditioning them on query samples.
+    It uses multi-head cross-attention to adaptively weight and refine features
+    based on query-gallery relationships.
+    
+    How it works:
+    1. Takes query features (anchor features) and gallery features (features to be refined)
+    2. Applies cross-attention: gallery features attend to query features
+    3. The refined features become query-specific, improving matching quality
+    4. At inference, can treat each query differently, or use average for efficiency
+    
+    Inputs:
+        feat_dim: dimension of input features (e.g., 768 for ViT-base)
+        hidden_dim: hidden dimension for the adapter (default 256)
+        num_heads: number of attention heads (default 4)
+        dropout: dropout rate (default 0.1)
+    """
+    def __init__(self, feat_dim, hidden_dim=256, num_heads=4, dropout=0.1):
+        super(QueryAdapter, self).__init__()
+        self.feat_dim = feat_dim
+        self.hidden_dim = hidden_dim
+        self.num_heads = num_heads
+        
+        # Multi-head cross-attention: gallery attends to query
+        self.attention = nn.MultiheadAttention(
+            embed_dim=feat_dim,
+            num_heads=num_heads,
+            dropout=dropout,
+            batch_first=True
+        )
+        
+        # Refinement MLP: refines attended features
+        self.refine_mlp = nn.Sequential(
+            nn.Linear(feat_dim, hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, feat_dim),
+            nn.Dropout(dropout)
+        )
+        
+        # Layer normalization for residual connections
+        self.norm1 = nn.LayerNorm(feat_dim)
+        self.norm2 = nn.LayerNorm(feat_dim)
+        
+        # Initialize weights
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0.0)
+    
+    def forward(self, gallery_feat, query_feat, return_attention=False):
+        """
+        Forward pass for query conditioning.
+        
+        Args:
+            gallery_feat: features to be refined (B, D) or (B, N, D)
+            query_feat: query features used for conditioning (B, D) or (B, N, D)
+            return_attention: if True, returns attention weights
+        
+        Returns:
+            refined_feat: query-conditioned features (same shape as gallery_feat)
+            attn_weights: (optional) attention weights if return_attention=True
+        """
+        # Handle both 2D (B, D) and 3D (B, N, D) inputs
+        gallery_is_2d = gallery_feat.dim() == 2
+        if gallery_is_2d:
+            gallery_feat = gallery_feat.unsqueeze(1)  # (B, D) -> (B, 1, D)
+        
+        query_is_2d = query_feat.dim() == 2
+        if query_is_2d:
+            query_feat = query_feat.unsqueeze(1)  # (B, D) -> (B, 1, D)
+        
+        # Cross-attention: gallery attends to query features
+        # Query (key, value): query features
+        # Gallery (query): features to be refined
+        attn_out, attn_weights = self.attention(
+            gallery_feat, query_feat, query_feat
+        )
+        
+        # Residual connection + normalization
+        gallery_feat = self.norm1(gallery_feat + attn_out)
+        
+        # MLP refinement with residual
+        mlp_out = self.refine_mlp(gallery_feat)
+        refined_feat = self.norm2(gallery_feat + mlp_out)
+        
+        # Restore original dimensionality
+        if gallery_is_2d:
+            refined_feat = refined_feat.squeeze(1)
+        
+        if return_attention:
+            return refined_feat, attn_weights
+        return refined_feat
+
+
 class Backbone(nn.Module):
     def __init__(self, model_name, num_classes, cfg):
         super(Backbone, self).__init__()
@@ -175,6 +274,7 @@ class build_vit(nn.Module):
         self.neck = cfg.MODEL.NECK
         self.neck_feat = cfg.TEST.NECK_FEAT
         self.in_planes = 768
+        self.query_conditioning = cfg.MODEL.QUERY_CONDITIONING
 
         print('using Transformer_type: vit as a backbone')
 
@@ -196,16 +296,51 @@ class build_vit(nn.Module):
         if self.pretrain_choice == 'imagenet':
             self.base.load_param(self.model_path)
             print('Loading pretrained ImageNet model......from {}'.format(self.model_path))
-            
+        
+        # Initialize query adapter if enabled
+        if self.query_conditioning:
+            self.query_adapter = QueryAdapter(
+                feat_dim=self.in_planes,
+                hidden_dim=cfg.MODEL.QC_HIDDEN_DIM,
+                num_heads=cfg.MODEL.QC_NUM_HEADS,
+                dropout=cfg.MODEL.QC_DROPOUT
+            )
+            print('Query conditioning enabled with hidden_dim={}, num_heads={}'.format(
+                cfg.MODEL.QC_HIDDEN_DIM, cfg.MODEL.QC_NUM_HEADS))
+        
         self.classifier = nn.Linear(self.in_planes, self.num_classes, bias=False)
         self.classifier.apply(weights_init_classifier)
         self.bottleneck = nn.BatchNorm1d(self.in_planes)
         self.bottleneck.bias.requires_grad_(False)
         self.bottleneck.apply(weights_init_kaiming)
 
-    def forward(self, x):
+    def forward(self, x, query_feat=None):
+        """
+        Forward pass with optional query conditioning.
+        
+        Args:
+            x: input images (B, C, H, W)
+            query_feat: optional query features for conditioning (B, D). 
+                       If None and query_conditioning is enabled, uses first sample as query
+        
+        Returns:
+            During training: (cls_score, global_feat) or (cls_score, global_feat, refined_feat)
+            During inference: features (refined or original depending on query_conditioning)
+        """
         x = self.base(x) # B, N, C
         global_feat = x[:, 0] # cls token for global feature
+
+        # Apply query conditioning if enabled
+        if self.query_conditioning:
+            if query_feat is None and self.training:
+                # During training, use first sample of each identity as query
+                # This is handled by the training loop
+                query_feat = global_feat
+            
+            if query_feat is not None:
+                # Refine global features using query conditioning
+                refined_feat = self.query_adapter(global_feat, query_feat)
+                global_feat = refined_feat
 
         feat = self.bottleneck(global_feat)
 
@@ -254,6 +389,7 @@ class build_part_attention_vit(nn.Module):
         self.neck = cfg.MODEL.NECK
         self.neck_feat = cfg.TEST.NECK_FEAT
         self.in_planes = 768
+        self.query_conditioning = cfg.MODEL.QUERY_CONDITIONING
 
         print('using Transformer_type: part token vit as a backbone')
 
@@ -281,25 +417,60 @@ class build_part_attention_vit(nn.Module):
             print("Loading self-trained checkpoint")
             self.load_param(self.model_path)
 
+        # Initialize query adapter if enabled
+        if self.query_conditioning:
+            self.query_adapter = QueryAdapter(
+                feat_dim=self.in_planes,
+                hidden_dim=cfg.MODEL.QC_HIDDEN_DIM,
+                num_heads=cfg.MODEL.QC_NUM_HEADS,
+                dropout=cfg.MODEL.QC_DROPOUT
+            )
+            print('Query conditioning enabled for part_attention_vit with hidden_dim={}, num_heads={}'.format(
+                cfg.MODEL.QC_HIDDEN_DIM, cfg.MODEL.QC_NUM_HEADS))
+
         self.bottleneck = nn.BatchNorm1d(self.in_planes)
         self.bottleneck.bias.requires_grad_(False)
         self.bottleneck.apply(weights_init_kaiming)
         self.classifier = nn.Linear(self.in_planes, self.num_classes, bias=False)
         self.classifier.apply(weights_init_classifier)
 
-    def forward(self, x):
+    def forward(self, x, query_feat=None):
+        """
+        Forward pass with optional query conditioning for part attention ViT.
+        
+        Args:
+            x: input images (B, C, H, W)
+            query_feat: optional query features for conditioning (B, D).
+                       If None and query_conditioning is enabled, uses first sample as query
+        
+        Returns:
+            During training: (cls_score, layerwise_cls_tokens, layerwise_part_tokens)
+            During inference: features (optionally refined by query conditioning)
+        """
         layerwise_tokens = self.base(x) # B, N, C
         layerwise_cls_tokens = [t[:, 0] for t in layerwise_tokens] # cls token
         part_feat_list = layerwise_tokens[-1][:, 1: 4] # 3, 768
 
         layerwise_part_tokens = [[t[:, i] for i in range(1,4)] for t in layerwise_tokens] # 12 3 768
-        feat = self.bottleneck(layerwise_cls_tokens[-1])
+        
+        # Apply query conditioning if enabled
+        cls_feat = layerwise_cls_tokens[-1]
+        if self.query_conditioning:
+            if query_feat is None and self.training:
+                # During training, use first sample as query for each identity
+                query_feat = cls_feat
+            
+            if query_feat is not None:
+                # Refine cls token features using query conditioning
+                cls_feat = self.query_adapter(cls_feat, query_feat)
+        
+        feat = self.bottleneck(cls_feat)
 
         if self.training:
             cls_score = self.classifier(feat)
             return cls_score, layerwise_cls_tokens, layerwise_part_tokens
         else:
-            return feat if self.neck_feat == 'after' else layerwise_cls_tokens[-1]
+            return feat if self.neck_feat == 'after' else cls_feat
 
     def load_param(self, trained_path):
         param_dict = torch.load(trained_path)
