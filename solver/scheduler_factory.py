@@ -5,7 +5,7 @@ from .cosine_lr import CosineLRScheduler
 
 
 def create_scheduler(cfg, optimizer):
-    num_epochs = 120
+    num_epochs = cfg.SOLVER.MAX_EPOCHS
     # type 1
     # lr_min = 0.01 * cfg.SOLVER.BASE_LR
     # warmup_lr_init = 0.001 * cfg.SOLVER.BASE_LR
