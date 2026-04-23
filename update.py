@@ -40,52 +40,24 @@ def apply_class_penalty(dist_mat, query_classes, gallery_classes):
     return penalized_dist
 
 def extract_feature(model, dataloaders, num_query):
-    """
-    Extract features from images using the model.
-    
-    If query conditioning is enabled, extracts query features and uses them
-    to condition gallery features for improved matching.
-    
-    Args:
-        model: the ReID model
-        dataloaders: data loader for images
-        num_query: number of query images
-    
-    Returns:
-        qf: query features
-        gf: gallery features
-    """
     features = []
     count = 0
     img_path = []
-    
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    model.eval()
 
     for data in dataloaders:
-        img, a, b, _, _ = data.values()
+        img, a, b,_,_ = data.values()
+        #obtain values form dict data
         n, c, h, w = img.size()
         count += n
-        ff = torch.FloatTensor(n, 768).zero_().to(device)
-        img = img.to(device)
-        
+        ff = torch.FloatTensor(n, 768).zero_().cuda()  # 2048 is pool5 of resnet
         for i in range(2):
-            # Extract features with optional query conditioning
-            with torch.no_grad():
-                if cfg.MODEL.QUERY_CONDITIONING:
-                    # For query conditioning: use identity information to refine features
-                    # In this eval mode, we use each image as its own query for self-conditioning
-                    outputs = model(img, query_feat=None)  # Self-conditioning
-                else:
-                    outputs = model(img)
-            
+            input_img = img.cuda()
+            outputs = model(input_img)
             f = outputs.float()
             ff = ff + f
-        
         fnorm = torch.norm(ff, p=2, dim=1, keepdim=True)
         ff = ff.div(fnorm.expand_as(ff))
         features.append(ff)
-    
     features = torch.cat(features, 0)
 
     # query

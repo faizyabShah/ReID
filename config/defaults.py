@@ -68,14 +68,6 @@ _C.MODEL.PC_SCALE = 0.02
 _C.MODEL.PC_LOSS = True
 _C.MODEL.PC_LR = 1.0
 
-# Query Conditioning: makes feature extraction dependent on query samples
-# When enabled, features are refined based on query-gallery relationships
-_C.MODEL.QUERY_CONDITIONING = False
-_C.MODEL.QC_HIDDEN_DIM = 256  # hidden dimension for query adapter
-_C.MODEL.QC_NUM_HEADS = 4  # number of attention heads in query adapter
-_C.MODEL.QC_DROPOUT = 0.1  # dropout in query adapter
-_C.MODEL.QC_LOSS_WEIGHT = 0.1  # weight for query conditioning regularization loss
-
 # soft label
 _C.MODEL.SOFT_LABEL = True
 _C.MODEL.CLUSTER_K = 10 # num of clusters

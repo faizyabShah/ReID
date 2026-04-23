@@ -13,24 +13,6 @@ import torch.nn.functional as F
 from data.build_DG_dataloader import build_reid_test_loader, build_reid_train_loader
 from torch.utils.tensorboard import SummaryWriter
 
-def get_query_features_per_identity(img, vid):
-    """
-    Extract query features (first image of each identity) from a batch.
-    
-    This is used for query conditioning: for each person identity in the batch,
-    we take the first occurrence as the "query" and condition other samples on it.
-    
-    Args:
-        img: batch of images (B, C, H, W)
-        vid: person IDs for each image (B,)
-    
-    Returns:
-        query_indices: indices of query samples (one per unique identity)
-        query_ids: unique identity IDs corresponding to queries
-    """
-    unique_vids, indices = torch.unique(vid, return_index=True)
-    return indices, unique_vids
-
 def part_attention_vit_do_train_with_amp(cfg,
              model,
              train_loader,
@@ -114,32 +96,8 @@ def part_attention_vit_do_train_with_amp(cfg,
             t_domains = t_domains.to(device)
 
             model.to(device)
-            
-            # Prepare query features if query conditioning is enabled
-            query_feat = None
-            if cfg.MODEL.QUERY_CONDITIONING and model.training:
-                # Get indices of first occurrence of each identity (queries)
-                query_indices, _ = get_query_features_per_identity(target, target)
-                
-                # Extract features of query samples by doing a forward pass
-                with torch.no_grad():
-                    _, query_feat_base, _ = model(img[query_indices])
-                
-                # Broadcast query features to all samples in batch
-                # Create a mapping from each sample to its identity's query
-                query_feat_per_sample = torch.zeros(target.shape[0], query_feat_base.shape[-1], device=device)
-                for idx, q_idx in enumerate(query_indices):
-                    # Find all samples belonging to this identity
-                    mask = target == target[q_idx]
-                    query_feat_per_sample[mask] = query_feat_base[idx]
-                
-                query_feat = query_feat_per_sample
-            
             with amp.autocast(enabled=True):
-                if cfg.MODEL.QUERY_CONDITIONING:
-                    score, layerwise_global_feat, layerwise_feat_list = model(img, query_feat=query_feat)
-                else:
-                    score, layerwise_global_feat, layerwise_feat_list = model(img)
+                score, layerwise_global_feat, layerwise_feat_list = model(img)
                 
                 ############## patch learning ######################
                 patch_agent, position = patch_centers.get_soft_label(img_path, layerwise_feat_list[-1], vid=vid, camid=camid)
