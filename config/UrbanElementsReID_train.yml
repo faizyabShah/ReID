@@ -1,13 +1,13 @@
 MODEL:
   PRETRAIN_CHOICE: 'imagenet'
   #PRETRAIN_PATH: "../../.cache/torch/hub/checkpoints" # root of pretrain path
-  PRETRAIN_PATH: "/home/faiz/UAM/DLVSP-I/ReID/" 
+  PRETRAIN_PATH: "./" 
   IF_LABELSMOOTH: 'on'
   IF_WITH_CENTER: 'no'
   NAME: 'part_attention_vit'
   NO_MARGIN: True
   DEVICE_ID: ('0')
-  TRANSFORMER_TYPE: 'vit_base_patch16_224_TransReID'
+  TRANSFORMER_TYPE: 'vit_large_patch16_224_TransReID'
   STRIDE_SIZE: [16, 16]
 
 INPUT:
