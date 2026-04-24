@@ -11,11 +11,6 @@ CKPT_PATH="/kaggle/working/ReID_dataset"
 
 echo "Using checkpoint: $CKPT_PATH"
 
-# Fail early if missing
-if [ ! -f "$CKPT_PATH" ]; then
-  echo "ERROR: Checkpoint not found at $CKPT_PATH"
-  exit 1
-fi
 
 echo "[Stage 2] Training on Urban2026 using pretrained checkpoint"
 
