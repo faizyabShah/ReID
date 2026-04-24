@@ -7,7 +7,7 @@ cd "$REPO_ROOT"
 CONFIG_PATH="config/UrbanElementsReID_train.yml"
 
 # ✅ Now using WORKING directory (writeable)
-CKPT_PATH="/kaggle/working/ReID_dataset"
+CKPT_PATH="/kaggle/working/ReID_dataset/jx_vit_large_p16_224-4ee7a4dc.pth"
 
 echo "Using checkpoint: $CKPT_PATH"
 
