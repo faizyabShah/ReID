@@ -1,7 +1,7 @@
 MODEL:
   PRETRAIN_CHOICE: 'imagenet'
   #PRETRAIN_PATH: "../../.cache/torch/hub/checkpoints" # root of pretrain path
-  PRETRAIN_PATH: "/home/faiz/UAM/DLVSP-I/ReID/" # 
+  PRETRAIN_PATH: "./" # 
   METRIC_LOSS_TYPE: 'triplet'
   IF_LABELSMOOTH: 'on'
   IF_WITH_CENTER: 'no'
@@ -26,7 +26,7 @@ DATASETS:
   TRAIN: ('UrbanElementsReID',)
   TEST: ('UrbanElementsReID_test',)
   #ROOT_DIR: ('../../data') # root of datasets
-  ROOT_DIR: '/home/faiz/UAM/DLVSP-I/ReID/Urban2026/'
+  ROOT_DIR: './MergedDataset'
 
 DATALOADER:
   SAMPLER: 'softmax_triplet'
@@ -52,7 +52,7 @@ TEST:
   EVAL: True
   IMS_PER_BATCH: 128
   RE_RANKING: False
-  WEIGHT: "./models/model/part_attention_vit_60.pth" #test 
+  WEIGHT: "./models/model/part_attention_vit_100.pth" #test 
   NECK_FEAT: 'before'
   FEAT_NORM: True
 
