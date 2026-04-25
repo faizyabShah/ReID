@@ -49,7 +49,7 @@ def extract_feature(model, dataloaders, num_query):
         #obtain values form dict data
         n, c, h, w = img.size()
         count += n
-        ff = torch.FloatTensor(n, 768).zero_().cuda()  # 2048 is pool5 of resnet
+        ff = torch.FloatTensor(n, 1024).zero_().cuda()  # 2048 is pool5 of resnet
         for i in range(2):
             input_img = img.cuda()
             outputs = model(input_img)
