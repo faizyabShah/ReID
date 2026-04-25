@@ -123,8 +123,8 @@ if __name__ == "__main__":
 
     re_rank_dist = re_ranking(q_g_dist, q_q_dist, g_g_dist)
 
-    query_csv_path = "./Urban2026/query_classes.csv"
-    gallery_csv_path = "./Urban2026/test_classes.csv"
+    query_csv_path = "/kaggle/working/ReID/Urban2026/query_classes.csv"
+    gallery_csv_path = "/kaggle/working/ReID/Urban2026/test_classes.csv"
     
     query_classes = read_classes_from_csv(query_csv_path)
     gallery_classes = read_classes_from_csv(gallery_csv_path)
