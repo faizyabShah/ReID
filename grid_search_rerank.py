@@ -44,9 +44,9 @@ if use_class_penalty:
     gallery_classes = read_classes(gallery_classes_csv)
 
 # ---------------- GRID ----------------
-k1_list = [10, 15, 20, 25, 30]
-k2_list = [3, 6, 9]
-lambda_list = [0.1, 0.3, 0.5, 0.7]
+k1_list = [5, 7, 10, 12,  15, 17, 20, 22, 25, 30]
+k2_list = [3, 5, 6, 8, 9]
+lambda_list = [0.1, 0.3, 0.5, 0.7, 0.9]
 
 best_mAP = 0
 best_params = None
