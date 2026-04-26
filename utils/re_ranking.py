@@ -37,7 +37,7 @@ def k_reciprocal_neigh( initial_rank, i, k1):
     fi = np.where(backward_k_neigh_index==i)[0]
     return forward_k_neigh_index[fi]
 
-def re_ranking(q_g_dist, q_q_dist, g_g_dist, k1=20, k2=6, lambda_value=0.3):
+def re_ranking(q_g_dist, q_q_dist, g_g_dist, k1=15, k2=3, lambda_value=0.3):
     # The following naming, e.g. gallery_num, is different from outer scope.
     # Don't care about it.
     original_dist = np.concatenate(

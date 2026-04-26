@@ -21,7 +21,7 @@ def read_classes_from_csv(csv_path):
         reader = csv.reader(f)
         next(reader)  # Skip the header (cameraID, imageName, Class)
         for row in reader:
-            classes.append(row[3])  # The Class is the 3rd column
+            classes.append(row[2])  # The Class is the 3rd column
     return classes
 
 def apply_class_penalty(dist_mat, query_classes, gallery_classes):
@@ -123,8 +123,8 @@ if __name__ == "__main__":
 
     re_rank_dist = re_ranking(q_g_dist, q_q_dist, g_g_dist)
 
-    query_csv_path = "/kaggle/working/ReID/UAM_Unified/query_classes.csv"
-    gallery_csv_path = "/kaggle/working/ReID/UAM_Unified/test_classes.csv"
+    query_csv_path = "/kaggle/working/ReID/Urban2026/query_classes.csv"
+    gallery_csv_path = "/kaggle/working/ReID/Urban2026/test_classes.csv"
 
     query_classes = read_classes_from_csv(query_csv_path)
     gallery_classes = read_classes_from_csv(gallery_csv_path)
