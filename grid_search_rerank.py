@@ -27,7 +27,7 @@ def read_classes(csv_path):
         reader = csv.reader(f)
         next(reader)
         for row in reader:
-            classes.append(row[2])
+            classes.append(row[3])
     return classes
 
 def apply_class_penalty(dist_mat, query_classes, gallery_classes):
