@@ -21,7 +21,7 @@ def read_classes_from_csv(csv_path):
         reader = csv.reader(f)
         next(reader)  # Skip the header (cameraID, imageName, Class)
         for row in reader:
-            classes.append(row[2])  # The Class is the 3rd column
+            classes.append(row[3])  # The Class is the 3rd column
     return classes
 
 def apply_class_penalty(dist_mat, query_classes, gallery_classes):
