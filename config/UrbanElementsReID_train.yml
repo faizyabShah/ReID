@@ -1,14 +1,17 @@
 MODEL:
   PRETRAIN_CHOICE: 'imagenet'
   #PRETRAIN_PATH: "../../.cache/torch/hub/checkpoints" # root of pretrain path
-  PRETRAIN_PATH: "/home/faiz/UAM/DLVSP-I/ReID/" 
+  PRETRAIN_PATH: "/media/DiscoLocal/IPCV/Urban_ReID/ReID/" 
   IF_LABELSMOOTH: 'on'
   IF_WITH_CENTER: 'no'
   NAME: 'part_attention_vit'
   NO_MARGIN: True
   DEVICE_ID: ('0')
-  TRANSFORMER_TYPE: 'vit_base_patch16_224_TransReID'
+  TRANSFORMER_TYPE: 'vit_large_patch16_224_TransReID'
   STRIDE_SIZE: [16, 16]
+  GRAD_CHECKPOINTING: True
+  DROP_PATH: 0.25
+  DROP_OUT: 0.1
 
 INPUT:
   SIZE_TRAIN: [256,128]
@@ -18,14 +21,27 @@ INPUT:
   PIXEL_MEAN: [0.5, 0.5, 0.5]
   PIXEL_STD: [0.5, 0.5, 0.5]
   LGT: # Local Grayscale Transfomation
-    DO_LGT: True
+    DO_LGT: False
+    PROB: 0.1
+  CJ:
+    ENABLED: True
+    PROB: 0.7
+    BRIGHTNESS: 0.3
+    CONTRAST: 0.3
+    SATURATION: 0.2
+    HUE: 0.1
+  REA:
+    ENABLED: True
+    PROB: 0.5
+  RPT:
+    ENABLED: True
     PROB: 0.5
 
 DATASETS:
   TRAIN: ('UrbanElementsReID',)
   TEST: ('UrbanElementsReID',)
   #ROOT_DIR: ('../../data') # root of datasets
-  ROOT_DIR: '/home/faiz/UAM/DLVSP-I/ReID/Urban2026/'
+  ROOT_DIR: '/media/DiscoLocal/IPCV/Urban_ReID/ReID/Urban2026_UAM_MERGED'
 
 DATALOADER:
   SAMPLER: 'softmax_triplet'
@@ -34,9 +50,10 @@ DATALOADER:
 
 SOLVER:
   OPTIMIZER_NAME: 'SGD'
-  MAX_EPOCHS: 60
+  MAX_EPOCHS: 30
   BASE_LR: 0.001 # 0.0004 for msmt
-  IMS_PER_BATCH: 64
+  IMS_PER_BATCH: 16
+  GRAD_ACCUM_STEPS: 4
   WARMUP_METHOD: 'linear'
   LARGE_FC_LR: False
   CHECKPOINT_PERIOD: 5
@@ -49,7 +66,7 @@ SOLVER:
 
 TEST:
   EVAL: True
-  IMS_PER_BATCH: 128
+  IMS_PER_BATCH: 16
   RE_RANKING: False
   WEIGHT: ''
   NECK_FEAT: 'before'

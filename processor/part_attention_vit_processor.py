@@ -51,6 +51,7 @@ def part_attention_vit_do_train_with_amp(cfg,
     evaluator = R1_mAP_eval(num_query, max_rank=50, feat_norm=cfg.TEST.FEAT_NORM)
     scaler = amp.GradScaler(init_scale=512)
     batch_size = cfg.SOLVER.IMS_PER_BATCH
+    accum_steps = cfg.SOLVER.GRAD_ACCUM_STEPS
     # train
     if cfg.MODEL.PC_LOSS:
         print('initialize the centers')
@@ -89,6 +90,8 @@ def part_attention_vit_do_train_with_amp(cfg,
             img_path = informations['img_path']
             t_domains = informations['others']['domains']
 
+            if n_iter % accum_steps == 0:
+                optimizer.zero_grad()
             optimizer.zero_grad()
             img = img.to(device)
             target = vid.to(device)
@@ -119,11 +122,13 @@ def part_attention_vit_do_train_with_amp(cfg,
                     reid_loss = loss_fn(score, layerwise_global_feat[-1], target, soft_label=cfg.MODEL.SOFT_LABEL)
                 
                 total_loss = reid_loss + l_ploss*ploss
+                total_loss_accum = total_loss / accum_steps
 
-            scaler.scale(total_loss).backward()
+            scaler.scale(total_loss_accum).backward()
 
-            scaler.step(optimizer)
-            scaler.update()
+            if (n_iter + 1) % accum_steps == 0 or (n_iter + 1) == len(train_loader):
+                scaler.step(optimizer)
+                scaler.update()
 
             # score = scores[-1]
             if isinstance(score, list):

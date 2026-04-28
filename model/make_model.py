@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 
 from .backbones.resnet import BasicBlock, ResNet, Bottleneck
-from .backbones import vit_base_patch16_224_TransReID, vit_small_patch16_224_TransReID, deit_small_patch16_224_TransReID
+from .backbones import vit_base_patch16_224_TransReID, vit_small_patch16_224_TransReID, deit_small_patch16_224_TransReID, vit_large_patch16_224_TransReID
 
 # alter this to your pre-trained file name
 lup_path_name = {
@@ -280,7 +280,8 @@ class build_part_attention_vit(nn.Module):
         elif self.pretrain_choice == 'self':
             print("Loading self-trained checkpoint")
             self.load_param(self.model_path)
-
+        if cfg.MODEL.GRAD_CHECKPOINTING:
+            self.base.set_grad_checkpointing(True)
         self.bottleneck = nn.BatchNorm1d(self.in_planes)
         self.bottleneck.bias.requires_grad_(False)
         self.bottleneck.apply(weights_init_kaiming)

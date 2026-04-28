@@ -1,0 +1,5 @@
+import csv; from pathlib import Path
+U,A,M=Path("Urban2026"),Path("UAM_Unified"),Path("Urban2026_UAM_MERGED"); R=lambda p:[r for r in csv.reader(open(p, newline="", encoding="utf-8-sig"))][1:]
+ut,at,mt=R(U/"train.csv"),R(A/"train.csv"),R(M/"train.csv"); mu=max(int(r[2]) for r in ut); assert len(mt)==len(ut)+len(at) and all((M/"image_train"/r[1]).exists() for r in mt[:500])
+assert min(int(r[2]) for r in mt if r[1].startswith("uam/"))==min(int(r[2]) for r in at)+mu+1 and set(r[1] for r in R(U/"test.csv"))==set(r[1] for r in R(M/"test.csv")) and set(r[1] for r in R(U/"query.csv"))==set(r[1] for r in R(M/"query.csv"))
+assert all((M/"image_test"/img).exists() for img in set(r[1] for r in R(M/"test.csv"))) and all((M/"image_query"/img).exists() for img in set(r[1] for r in R(M/"query.csv"))); print("Sanity check OK")
