@@ -19,3 +19,6 @@ Then download the model file from this link:
 [jx_vit_base_p16_224-80ecf9dd.pth](https://github.com/rwightman/pytorch-image-models/releases/download/v0.1-vitjx/jx_vit_base_p16_224-80ecf9dd.pth)
 
 Then change the dataset directory and model directory in `config/UrbanElementsReID_test.yml` and `config/UrbanElementsReID_train.yml`.
+
+The pytorch weights for CUDA 12.4 can be downloaded using the following command:
+pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124

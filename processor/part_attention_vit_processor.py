@@ -207,7 +207,8 @@ def part_attention_vit_do_train_with_amp(cfg,
         do_inference(cfg, eval_model, val_loader, num_query)
     
     # remove useless path files
-    del_list = os.listdir(log_path)
+    # del_list = os.listdir(log_path)
+    del_list = []
     for fname in del_list:
         if '.pth' in fname:
             os.remove(os.path.join(log_path, fname))
