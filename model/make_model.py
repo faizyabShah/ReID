@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 
 from .backbones.resnet import BasicBlock, ResNet, Bottleneck
-from .backbones import vit_base_patch16_224_TransReID, vit_small_patch16_224_TransReID, deit_small_patch16_224_TransReID
+from .backbones import vit_base_patch16_224_TransReID, vit_small_patch16_224_TransReID, deit_small_patch16_224_TransReID, vit_large_patch16_224_TransReID
 
 # alter this to your pre-trained file name
 lup_path_name = {
