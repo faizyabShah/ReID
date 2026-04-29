@@ -503,7 +503,7 @@ class TransReID(nn.Module):
         self.num_classes = num_classes
         self.fc = nn.Linear(self.embed_dim, num_classes) if num_classes > 0 else nn.Identity()
 
-    def forward_features(self, x):
+    def forward_features(self, x, return_layerwise=False):
         B = x.shape[0]
         x = self.patch_embed(x)
 
@@ -513,6 +513,12 @@ class TransReID(nn.Module):
         x = x + self.pos_embed
 
         x = self.pos_drop(x)
+        if return_layerwise:
+            layerwise_tokens = []
+            for blk in self.blocks:
+                x = blk(x)
+                layerwise_tokens.append(self.norm(x))
+            return layerwise_tokens
 
         for blk in self.blocks:
             x = blk(x)
@@ -522,8 +528,8 @@ class TransReID(nn.Module):
         # return x[:, 0]
         return x # (B, N, C)
 
-    def forward(self, x):
-        x = self.forward_features(x)
+    def forward(self, x, return_layerwise=False):
+        x = self.forward_features(x, return_layerwise=return_layerwise)
         return x
 
     def load_param(self, model_path):

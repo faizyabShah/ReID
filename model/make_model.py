@@ -204,6 +204,12 @@ class build_vit(nn.Module):
         self.bottleneck.apply(weights_init_kaiming)
 
     def forward(self, x):
+        if not self.training and self.cfg.TEST.CLS_FUSION:
+            layerwise_tokens = self.base(x, return_layerwise=True)
+            last_k = layerwise_tokens[-self.cfg.TEST.CLS_FUSION_LAST:]
+            cls_tokens = [t[:, 0] for t in last_k]
+            fused_feat = torch.cat(cls_tokens, dim=1)
+            return fused_feat
         x = self.base(x) # B, N, C
         global_feat = x[:, 0] # cls token for global feature
 
@@ -299,6 +305,10 @@ class build_part_attention_vit(nn.Module):
             cls_score = self.classifier(feat)
             return cls_score, layerwise_cls_tokens, layerwise_part_tokens
         else:
+            if self.cfg.TEST.CLS_FUSION:
+                last_k = layerwise_cls_tokens[-self.cfg.TEST.CLS_FUSION_LAST:]
+                fused_feat = torch.cat(last_k, dim=1)
+                return fused_feat
             return feat if self.neck_feat == 'after' else layerwise_cls_tokens[-1]
 
     def load_param(self, trained_path):

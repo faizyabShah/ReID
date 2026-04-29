@@ -226,6 +226,10 @@ _C.TEST.DIST_MAT = "dist_mat.npy"
 # Whether calculate the eval score option: 'True', 'False'
 _C.TEST.EVAL = False
 
+# Concatenate CLS tokens from last K blocks at inference
+_C.TEST.CLS_FUSION = False
+_C.TEST.CLS_FUSION_LAST = 6
+
 # ---------------------------------------------------------------------------- #
 # Misc options
 # ---------------------------------------------------------------------------- #
