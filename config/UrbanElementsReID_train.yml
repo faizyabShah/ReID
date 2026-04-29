@@ -1,7 +1,7 @@
 MODEL:
   PRETRAIN_CHOICE: 'imagenet'
   #PRETRAIN_PATH: "../../.cache/torch/hub/checkpoints" # root of pretrain path
-  PRETRAIN_PATH: "/home/sidna/ReID_Project/ReID/" 
+  PRETRAIN_PATH: "/home/sidna/ReID_Project/ReID/models/model/" 
   IF_LABELSMOOTH: 'on'
   IF_WITH_CENTER: 'no'
   NAME: 'part_attention_vit'
