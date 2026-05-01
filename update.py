@@ -128,7 +128,7 @@ if __name__ == "__main__":
     re_rank_dist = re_ranking(q_g_dist, q_q_dist, g_g_dist)
 
     query_csv_path = os.path.join(cfg.DATASETS.ROOT_DIR, "test_classes.csv")
-    gallery_csv_path = os.path.join(cfg.DATASETS.ROOT_DIR, "test_classes.csv")
+    gallery_csv_path = os.path.join(cfg.DATASETS.ROOT_DIR, "query_classes.csv")
 
     query_classes = read_classes_from_csv(query_csv_path)
     gallery_classes = read_classes_from_csv(gallery_csv_path)
