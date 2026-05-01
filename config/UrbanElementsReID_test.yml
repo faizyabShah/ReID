@@ -52,11 +52,11 @@ TEST:
   EVAL: True
   IMS_PER_BATCH: 128
   RE_RANKING: False
-  WEIGHT: "./models/model/part_attention_vit_10.pth" #test 
+  WEIGHT: "./models/model/part_attention_vit_25.pth" #test 
   NECK_FEAT: 'before'
   FEAT_NORM: True
   CLS_FUSION: True
-  CLS_FUSION_LAST: 6
+  CLS_FUSION_LAST: 8
 
 LOG_ROOT: 'models/' # root of log file
 TB_LOG_ROOT: './tb_log/'

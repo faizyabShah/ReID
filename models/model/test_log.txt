@@ -1,6 +1,6 @@
-2026-04-30 09:21:08,930 PAT INFO: Namespace(config_file='config/UrbanElementsReID_test.yml', opts=[], track='outputs/track')
-2026-04-30 09:21:08,931 PAT INFO: Loaded configuration file config/UrbanElementsReID_test.yml
-2026-04-30 09:21:08,931 PAT INFO: 
+2026-05-01 13:17:41,821 PAT INFO: Namespace(config_file='config/UrbanElementsReID_test.yml', opts=[], track='outputs/track')
+2026-05-01 13:17:41,821 PAT INFO: Loaded configuration file config/UrbanElementsReID_test.yml
+2026-05-01 13:17:41,821 PAT INFO: 
 MODEL:
   PRETRAIN_CHOICE: 'imagenet'
   #PRETRAIN_PATH: "../../.cache/torch/hub/checkpoints" # root of pretrain path
@@ -29,7 +29,7 @@ DATASETS:
   TRAIN: ('UrbanElementsReID',)
   TEST: ('UrbanElementsReID_test',)
   #ROOT_DIR: ('../../data') # root of datasets
-  ROOT_DIR: '/media/DiscoLocal/IPCV/Urban_ReID/ReID_Vitlarge64/ReID/Urban2026_UAM_MERGED'
+  ROOT_DIR: '/media/DiscoLocal/IPCV/Urban_ReID/ReID_Vitlarge64/ReID/Urban2026'
 
 DATALOADER:
   SAMPLER: 'softmax_triplet'
@@ -55,17 +55,17 @@ TEST:
   EVAL: True
   IMS_PER_BATCH: 128
   RE_RANKING: False
-  WEIGHT: "./models/model/part_attention_vit_20_faiz.pth" #test 
+  WEIGHT: "./models/model/part_attention_vit_25.pth" #test 
   NECK_FEAT: 'before'
   FEAT_NORM: True
   CLS_FUSION: True
-  CLS_FUSION_LAST: 6
+  CLS_FUSION_LAST: 8
 
 LOG_ROOT: 'models/' # root of log file
 TB_LOG_ROOT: './tb_log/'
 LOG_NAME: './model'
 
-2026-04-30 09:21:08,931 PAT INFO: Running with config:
+2026-05-01 13:17:41,821 PAT INFO: Running with config:
 DATALOADER:
   CAMERA_TO_DOMAIN: False
   DELETE_REM: False
@@ -77,7 +77,7 @@ DATALOADER:
   SAMPLER: softmax_triplet
 DATASETS:
   COMBINEALL: False
-  ROOT_DIR: /media/DiscoLocal/IPCV/Urban_ReID/ReID_Vitlarge64/ReID/Urban2026_UAM_MERGED
+  ROOT_DIR: /media/DiscoLocal/IPCV/Urban_ReID/ReID_Vitlarge64/ReID/Urban2026
   TEST: ('UrbanElementsReID_test',)
   TRAIN: ('UrbanElementsReID',)
 INPUT:
@@ -169,26 +169,26 @@ SOLVER:
 TB_LOG_ROOT: ./tb_log/
 TEST:
   CLS_FUSION: True
-  CLS_FUSION_LAST: 6
+  CLS_FUSION_LAST: 8
   DIST_MAT: dist_mat.npy
   EVAL: True
   FEAT_NORM: True
   IMS_PER_BATCH: 128
   NECK_FEAT: before
   RE_RANKING: False
-  WEIGHT: ./models/model/part_attention_vit_20_faiz.pth
-2026-04-30 09:21:12,558 PAT.train INFO: Number of parameter: 304.27M
-2026-04-30 09:21:13,602 PAT INFO: => Loaded UrbanElementsReID_test
-2026-04-30 09:21:13,602 PAT INFO:   ----------------------------------------
-2026-04-30 09:21:13,602 PAT INFO:   subset   | # ids | # images | # cameras
-2026-04-30 09:21:13,602 PAT INFO:   ----------------------------------------
-2026-04-30 09:21:13,602 PAT INFO:   query    |     1 |      928 |         1
-2026-04-30 09:21:13,602 PAT INFO:   gallery  |     1 |     2844 |         3
-2026-04-30 09:21:13,602 PAT INFO:   ----------------------------------------
-2026-04-30 09:21:13,603 PAT.test INFO: Enter inferencing
-2026-04-30 09:21:44,777 PAT.test INFO: Validation Results 
-2026-04-30 09:21:44,777 PAT.test INFO: mAP: 100.0%
-2026-04-30 09:21:44,777 PAT.test INFO: CMC curve, Rank-1  :100.0%
-2026-04-30 09:21:44,777 PAT.test INFO: CMC curve, Rank-5  :100.0%
-2026-04-30 09:21:44,777 PAT.test INFO: CMC curve, Rank-10 :100.0%
-2026-04-30 09:21:44,778 PAT.test INFO: total inference time: 30.92
+  WEIGHT: ./models/model/part_attention_vit_25.pth
+2026-05-01 13:17:45,498 PAT.train INFO: Number of parameter: 304.27M
+2026-05-01 13:17:46,508 PAT INFO: => Loaded UrbanElementsReID_test
+2026-05-01 13:17:46,508 PAT INFO:   ----------------------------------------
+2026-05-01 13:17:46,508 PAT INFO:   subset   | # ids | # images | # cameras
+2026-05-01 13:17:46,508 PAT INFO:   ----------------------------------------
+2026-05-01 13:17:46,508 PAT INFO:   query    |     1 |      928 |         1
+2026-05-01 13:17:46,508 PAT INFO:   gallery  |     1 |     2844 |         3
+2026-05-01 13:17:46,508 PAT INFO:   ----------------------------------------
+2026-05-01 13:17:46,509 PAT.test INFO: Enter inferencing
+2026-05-01 13:18:17,672 PAT.test INFO: Validation Results 
+2026-05-01 13:18:17,672 PAT.test INFO: mAP: 100.0%
+2026-05-01 13:18:17,672 PAT.test INFO: CMC curve, Rank-1  :100.0%
+2026-05-01 13:18:17,672 PAT.test INFO: CMC curve, Rank-5  :100.0%
+2026-05-01 13:18:17,672 PAT.test INFO: CMC curve, Rank-10 :100.0%
+2026-05-01 13:18:17,672 PAT.test INFO: total inference time: 30.91
