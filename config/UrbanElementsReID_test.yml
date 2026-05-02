@@ -57,6 +57,7 @@ TEST:
   FEAT_NORM: True
   CLS_FUSION: True
   CLS_FUSION_LAST: 8
+  DO_CLASS_FILTER: True
 
 LOG_ROOT: 'models/' # root of log file
 TB_LOG_ROOT: './tb_log/'

@@ -127,13 +127,15 @@ if __name__ == "__main__":
 
     re_rank_dist = re_ranking(q_g_dist, q_q_dist, g_g_dist)
 
-    query_csv_path = os.path.join(cfg.DATASETS.ROOT_DIR, "query_classes.csv")
-    gallery_csv_path = os.path.join(cfg.DATASETS.ROOT_DIR, "test_classes.csv")
+    if cfg.TEST.DO_CLASS_FILTER:
 
-    query_classes = read_classes_from_csv(query_csv_path)
-    gallery_classes = read_classes_from_csv(gallery_csv_path)
+        query_csv_path = os.path.join(cfg.DATASETS.ROOT_DIR, "query_classes.csv")
+        gallery_csv_path = os.path.join(cfg.DATASETS.ROOT_DIR, "test_classes.csv")
 
-    re_rank_dist = apply_class_penalty(re_rank_dist, query_classes, gallery_classes)
+        query_classes = read_classes_from_csv(query_csv_path)
+        gallery_classes = read_classes_from_csv(gallery_csv_path)
+
+        re_rank_dist = apply_class_penalty(re_rank_dist, query_classes, gallery_classes)
 
     indices = np.argsort(re_rank_dist, axis=1)[:, :100]
 
