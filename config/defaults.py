@@ -230,6 +230,9 @@ _C.TEST.EVAL = False
 _C.TEST.CLS_FUSION = False
 _C.TEST.CLS_FUSION_LAST = 6
 
+#class filtering
+_C.TEST.DO_CLASS_FILTER = False
+
 # ---------------------------------------------------------------------------- #
 # Misc options
 # ---------------------------------------------------------------------------- #
