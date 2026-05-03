@@ -56,7 +56,7 @@ TEST:
   NECK_FEAT: 'before'
   FEAT_NORM: True
   CLS_FUSION: True
-  CLS_FUSION_LAST: 8
+  CLS_FUSION_LAST: 6
 
 LOG_ROOT: 'models/' # root of log file
 TB_LOG_ROOT: './tb_log/'
