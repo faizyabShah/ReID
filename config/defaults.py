@@ -233,6 +233,39 @@ _C.TEST.CLS_FUSION_LAST = 6
 #class filtering
 _C.TEST.DO_CLASS_FILTER = False
 
+# Camera-Aware Jaccard (CAJ) adjustment for multi-camera scenarios
+_C.TEST.DO_CAJ_ADJUSTMENT = False
+_C.TEST.CAJ_SAME_CAM_PENALTY = 1.1  # >1 penalizes same-camera similarity
+_C.TEST.CAJ_CROSS_CAM_SCALE = 0.95  # <1 favors cross-camera matches
+
+# Class-based re-ranking with per-class k1/k2/lambda settings
+_C.TEST.DO_CLASS_BASED_RERANKING = False
+_C.TEST.CLASS_BASED_RERANKING_PARAMS = CN()
+_C.TEST.CLASS_BASED_RERANKING_PARAMS.DEFAULT = CN()
+_C.TEST.CLASS_BASED_RERANKING_PARAMS.DEFAULT.K1 = 20
+_C.TEST.CLASS_BASED_RERANKING_PARAMS.DEFAULT.K2 = 6
+_C.TEST.CLASS_BASED_RERANKING_PARAMS.DEFAULT.LAMBDA = 0.3
+
+_C.TEST.CLASS_BASED_RERANKING_PARAMS.container = CN()
+_C.TEST.CLASS_BASED_RERANKING_PARAMS.container.K1 = 20
+_C.TEST.CLASS_BASED_RERANKING_PARAMS.container.K2 = 6
+_C.TEST.CLASS_BASED_RERANKING_PARAMS.container.LAMBDA = 0.3
+
+_C.TEST.CLASS_BASED_RERANKING_PARAMS.crosswalk = CN()
+_C.TEST.CLASS_BASED_RERANKING_PARAMS.crosswalk.K1 = 20
+_C.TEST.CLASS_BASED_RERANKING_PARAMS.crosswalk.K2 = 6
+_C.TEST.CLASS_BASED_RERANKING_PARAMS.crosswalk.LAMBDA = 0.3
+
+_C.TEST.CLASS_BASED_RERANKING_PARAMS.rubbishbins = CN()
+_C.TEST.CLASS_BASED_RERANKING_PARAMS.rubbishbins.K1 = 20
+_C.TEST.CLASS_BASED_RERANKING_PARAMS.rubbishbins.K2 = 6
+_C.TEST.CLASS_BASED_RERANKING_PARAMS.rubbishbins.LAMBDA = 0.3
+
+_C.TEST.CLASS_BASED_RERANKING_PARAMS.traffic = CN()
+_C.TEST.CLASS_BASED_RERANKING_PARAMS.traffic.K1 = 20
+_C.TEST.CLASS_BASED_RERANKING_PARAMS.traffic.K2 = 6
+_C.TEST.CLASS_BASED_RERANKING_PARAMS.traffic.LAMBDA = 0.3
+
 # ---------------------------------------------------------------------------- #
 # Misc options
 # ---------------------------------------------------------------------------- #

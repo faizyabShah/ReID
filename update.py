@@ -39,13 +39,106 @@ def apply_class_penalty(dist_mat, query_classes, gallery_classes):
     
     return penalized_dist
 
+def apply_caj(q_g_dist, q_q_dist, g_g_dist, q_camids, g_camids,
+              same_cam_penalty=1.1, cross_cam_scale=0.95):
+    """Camera-Aware Jaccard (CAJ) adjustment for multi-camera retrieval.
+    
+    Args:
+        q_g_dist: (num_query, num_gallery)
+        q_q_dist: (num_query, num_query)
+        g_g_dist: (num_gallery, num_gallery)
+        q_camids: list/array (num_query,)
+        g_camids: list/array (num_gallery,)
+        same_cam_penalty: >1 → penalize same-camera similarity
+        cross_cam_scale: <1 → slightly favor cross-camera matches
+    
+    Returns:
+        adjusted q_g_dist, q_q_dist, g_g_dist
+    """
+    q_camids = np.array(q_camids)
+    g_camids = np.array(g_camids)
+
+    # ---- adjust q-q (same camera bias) ----
+    qq_same = q_camids[:, None] == q_camids[None, :]
+    q_q_dist = q_q_dist.copy()
+    q_q_dist[qq_same] *= same_cam_penalty
+
+    # ---- adjust g-g (same camera bias) ----
+    gg_same = g_camids[:, None] == g_camids[None, :]
+    g_g_dist = g_g_dist.copy()
+    g_g_dist[gg_same] *= same_cam_penalty
+
+    # ---- adjust q-g (optional cross-camera boost) ----
+    qg_same = q_camids[:, None] == g_camids[None, :]
+    q_g_dist = q_g_dist.copy()
+
+    # penalize same cam
+    q_g_dist[qg_same] *= same_cam_penalty
+
+    # boost cross-camera
+    q_g_dist[~qg_same] *= cross_cam_scale
+
+    return q_g_dist, q_q_dist, g_g_dist
+
+def normalize_class_name(class_name):
+    """Normalize class names so dataset-specific aliases share one config key."""
+    normalized = str(class_name).strip().lower().replace(" ", "").replace("_", "")
+    if normalized in {"trafficsign", "trafficsignal", "signal", "sign"}:
+        return "traffic"
+    return normalized
+
+def _extract_rerank_params(param_node):
+    return {
+        "k1": int(param_node.K1),
+        "k2": int(param_node.K2),
+        "lambda_value": float(param_node.LAMBDA),
+    }
+
+def apply_class_based_reranking(q_g_dist, q_q_dist, g_g_dist, query_classes, gallery_classes,
+                                class_rerank_cfg):
+    """Apply per-class reranking overrides on top of a base reranked matrix."""
+    query_classes = np.array([normalize_class_name(cls) for cls in query_classes])
+    gallery_classes = np.array([normalize_class_name(cls) for cls in gallery_classes])
+
+    default_params = _extract_rerank_params(class_rerank_cfg.DEFAULT)
+    final_dist = re_ranking(q_g_dist, q_q_dist, g_g_dist, **default_params)
+
+    all_classes = sorted(set(query_classes.tolist()) | set(gallery_classes.tolist()))
+    for class_name in all_classes:
+        q_indices = np.where(query_classes == class_name)[0]
+        g_indices = np.where(gallery_classes == class_name)[0]
+        if len(q_indices) == 0 or len(g_indices) == 0:
+            continue
+
+        class_params = class_rerank_cfg[class_name] if class_name in class_rerank_cfg else class_rerank_cfg.DEFAULT
+        class_params = _extract_rerank_params(class_params)
+        total_num = len(q_indices) + len(g_indices)
+        if total_num < 2:
+            continue
+
+        class_params["k1"] = max(1, min(class_params["k1"], total_num - 1))
+        class_params["k2"] = max(1, min(class_params["k2"], total_num))
+
+        class_dist = re_ranking(
+            q_g_dist[np.ix_(q_indices, g_indices)],
+            q_q_dist[np.ix_(q_indices, q_indices)],
+            g_g_dist[np.ix_(g_indices, g_indices)],
+            **class_params,
+        )
+        final_dist[np.ix_(q_indices, g_indices)] = class_dist
+
+    return final_dist
+
 def extract_feature(model, dataloaders, num_query):
+    """Extract features and collect camera IDs for CAJ adjustment."""
     features = []
+    camids = []
     count = 0
     img_path = []
 
     for data in dataloaders:
-        img, a, b,_,_ = data.values()
+        img = data['images']
+        camid = data['camid']
         #obtain values form dict data
         n, c, h, w = img.size()
         count += n
@@ -62,13 +155,17 @@ def extract_feature(model, dataloaders, num_query):
         fnorm = torch.norm(ff, p=2, dim=1, keepdim=True)
         ff = ff.div(fnorm.expand_as(ff))
         features.append(ff)
+        camids.extend(np.asarray(camid))
     features = torch.cat(features, 0)
+    camids = np.array(camids)
 
     # query
     qf = features[:num_query]
+    q_camids = camids[:num_query]
     # gallery
     gf = features[num_query:]
-    return qf, gf
+    g_camids = camids[num_query:]
+    return qf, gf, q_camids, g_camids
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="ReID Training")
@@ -113,7 +210,7 @@ if __name__ == "__main__":
         else:
             do_inf(cfg, model, val_loader, num_query)
     with torch.no_grad():
-        qf, gf = extract_feature(model, val_loader, num_query)
+        qf, gf, q_camids, g_camids = extract_feature(model, val_loader, num_query)
 
     # save feature
     qf=qf.cpu().numpy()
@@ -125,16 +222,39 @@ if __name__ == "__main__":
     q_q_dist = np.dot(qf, np.transpose(qf))
     g_g_dist = np.dot(gf, np.transpose(gf))
 
-    re_rank_dist = re_ranking(q_g_dist, q_q_dist, g_g_dist)
-
-    if cfg.TEST.DO_CLASS_FILTER:
-
-        query_csv_path = os.path.join(cfg.DATASETS.ROOT_DIR, "query_classes.csv")
-        gallery_csv_path = os.path.join(cfg.DATASETS.ROOT_DIR, "test_classes.csv")
-
+    query_csv_path = os.path.join(cfg.DATASETS.ROOT_DIR, "query_classes.csv")
+    gallery_csv_path = os.path.join(cfg.DATASETS.ROOT_DIR, "test_classes.csv")
+    need_classes = cfg.TEST.DO_CLASS_FILTER or cfg.TEST.DO_CLASS_BASED_RERANKING
+    query_classes = gallery_classes = None
+    if need_classes:
         query_classes = read_classes_from_csv(query_csv_path)
         gallery_classes = read_classes_from_csv(gallery_csv_path)
 
+    if cfg.TEST.DO_CLASS_BASED_RERANKING:
+        re_rank_dist = apply_class_based_reranking(
+            q_g_dist,
+            q_q_dist,
+            g_g_dist,
+            query_classes,
+            gallery_classes,
+            cfg.TEST.CLASS_BASED_RERANKING_PARAMS,
+        )
+    else:
+        re_rank_dist = re_ranking(q_g_dist, q_q_dist, g_g_dist)
+
+    # Apply Camera-Aware Jaccard adjustment if enabled
+    if cfg.TEST.DO_CAJ_ADJUSTMENT:
+        re_rank_dist, _, _ = apply_caj(
+            re_rank_dist,
+            q_q_dist,
+            g_g_dist,
+            q_camids,
+            g_camids,
+            same_cam_penalty=cfg.TEST.CAJ_SAME_CAM_PENALTY,
+            cross_cam_scale=cfg.TEST.CAJ_CROSS_CAM_SCALE,
+        )
+
+    if cfg.TEST.DO_CLASS_FILTER:
         re_rank_dist = apply_class_penalty(re_rank_dist, query_classes, gallery_classes)
 
     indices = np.argsort(re_rank_dist, axis=1)[:, :100]
