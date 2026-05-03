@@ -1,7 +1,7 @@
 MODEL:
   PRETRAIN_CHOICE: 'imagenet'
   #PRETRAIN_PATH: "../../.cache/torch/hub/checkpoints" # root of pretrain path
-  PRETRAIN_PATH: "/media/DiscoLocal/IPCV/Urban_ReID/ReID_Vitlarge64/ReID/" # 
+  PRETRAIN_PATH: "/media/DiscoLocal/IPCV/Urban_ReID/ReID_PostHoc_Faiz/ReID" # 
   METRIC_LOSS_TYPE: 'triplet'
   IF_LABELSMOOTH: 'on'
   IF_WITH_CENTER: 'no'
@@ -26,7 +26,7 @@ DATASETS:
   TRAIN: ('UrbanElementsReID',)
   TEST: ('UrbanElementsReID_test',)
   #ROOT_DIR: ('../../data') # root of datasets
-  ROOT_DIR: '/media/DiscoLocal/IPCV/Urban_ReID/ReID_Vitlarge64/ReID/Urban2026'
+  ROOT_DIR: '/media/DiscoLocal/IPCV/Urban_ReID/ReID_PostHoc_Faiz/ReID/Urban2026'
 
 DATALOADER:
   SAMPLER: 'softmax_triplet'
@@ -67,16 +67,16 @@ TEST:
       LAMBDA: 0.35
     container:
       K1: 20
-      K2: 6
-      LAMBDA: 0.35
+      K2: 2
+      LAMBDA: 0.50
     crosswalk:
-      K1: 24
-      K2: 4
-      LAMBDA: 0.35
-    rubbishbins:
       K1: 20
       K2: 4
-      LAMBDA: 0.35
+      LAMBDA: 0.3
+    rubbishbins:
+      K1: 18
+      K2: 8
+      LAMBDA: 0.25
     traffic:
       K1: 18
       K2: 4
