@@ -56,31 +56,31 @@ TEST:
   NECK_FEAT: 'before'
   FEAT_NORM: True
   CLS_FUSION: True
-  CLS_FUSION_LAST: 8
+  CLS_FUSION_LAST: 4
   DO_CLASS_FILTER: True
   DO_CAJ_ADJUSTMENT: True
   DO_CLASS_BASED_RERANKING: True
   CLASS_BASED_RERANKING_PARAMS:
     DEFAULT:
       K1: 20
-      K2: 6
-      LAMBDA: 0.3
+      K2: 4
+      LAMBDA: 0.35
     container:
-      K1: 18
-      K2: 6
-      LAMBDA: 0.30
-    crosswalk:
-      K1: 24
+      K1: 20
       K2: 6
       LAMBDA: 0.35
+    crosswalk:
+      K1: 24
+      K2: 4
+      LAMBDA: 0.35
     rubbishbins:
-      K1: 16
+      K1: 20
       K2: 4
-      LAMBDA: 0.28
+      LAMBDA: 0.35
     traffic:
-      K1: 14
+      K1: 18
       K2: 4
-      LAMBDA: 0.25
+      LAMBDA: 0.35
 
 LOG_ROOT: 'models/' # root of log file
 TB_LOG_ROOT: './tb_log/'

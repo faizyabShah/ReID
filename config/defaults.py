@@ -235,8 +235,8 @@ _C.TEST.DO_CLASS_FILTER = False
 
 # Camera-Aware Jaccard (CAJ) adjustment for multi-camera scenarios
 _C.TEST.DO_CAJ_ADJUSTMENT = False
-_C.TEST.CAJ_SAME_CAM_PENALTY = 1.1  # >1 penalizes same-camera similarity
-_C.TEST.CAJ_CROSS_CAM_SCALE = 0.95  # <1 favors cross-camera matches
+_C.TEST.CAJ_SAME_CAM_PENALTY = 1.0  # >1 penalizes same-camera similarity
+_C.TEST.CAJ_CROSS_CAM_SCALE = 0.90  # <1 favors cross-camera matches
 
 # Class-based re-ranking with per-class k1/k2/lambda settings
 _C.TEST.DO_CLASS_BASED_RERANKING = False
