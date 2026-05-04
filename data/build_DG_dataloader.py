@@ -37,6 +37,7 @@ def build_reid_train_loader(cfg):
     train_classes_map = {}
     class_to_idx = {}
     class_idx_counter = 0
+    _root = cfg.DATASETS.ROOT_DIR
     classes_path = os.path.join(_root, 'train_classes.csv')
     def _norm_class_name(s: str) -> str:
         key = "".join(ch.lower() for ch in s.strip() if ch.isalnum())
@@ -66,7 +67,6 @@ def build_reid_train_loader(cfg):
             train_classes_map = {}
 
     # load datasets
-    _root = cfg.DATASETS.ROOT_DIR
     for d in cfg.DATASETS.TRAIN:
         if d == 'CUHK03_NP':
             dataset = DATASET_REGISTRY.get('CUHK03')(root=_root, cuhk03_labeled=False)
