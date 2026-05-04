@@ -88,12 +88,17 @@ def part_attention_vit_do_train_with_amp(cfg,
             camid = informations['camid']
             img_path = informations['img_path']
             t_domains = informations['others']['domains']
+            t_classes = None
+            if 'class' in informations['others']:
+                t_classes = informations['others']['class']
 
             optimizer.zero_grad()
             img = img.to(device)
             target = vid.to(device)
             target_cam = camid.to(device)
             t_domains = t_domains.to(device)
+            if t_classes is not None:
+                t_classes = t_classes.to(device)
 
             model.to(device)
             with amp.autocast(enabled=True):
@@ -113,10 +118,10 @@ def part_attention_vit_do_train_with_amp(cfg,
                     loss2: reid-specific loss
                     (ID + Triplet loss)
                     '''
-                    reid_loss = loss_fn(score, layerwise_global_feat[-1], target, all_posvid=all_posvid, soft_label=cfg.MODEL.SOFT_LABEL, soft_weight=cfg.MODEL.SOFT_WEIGHT, soft_lambda=cfg.MODEL.SOFT_LAMBDA)
+                    reid_loss = loss_fn(score, layerwise_global_feat[-1], target, all_posvid=all_posvid, soft_label=cfg.MODEL.SOFT_LABEL, soft_weight=cfg.MODEL.SOFT_WEIGHT, soft_lambda=cfg.MODEL.SOFT_LAMBDA, class_labels=t_classes)
                 else:
                     ploss = torch.tensor([0.]).cuda()
-                    reid_loss = loss_fn(score, layerwise_global_feat[-1], target, soft_label=cfg.MODEL.SOFT_LABEL)
+                    reid_loss = loss_fn(score, layerwise_global_feat[-1], target, soft_label=cfg.MODEL.SOFT_LABEL, class_labels=t_classes)
                 
                 total_loss = reid_loss + l_ploss*ploss
 

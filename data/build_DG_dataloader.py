@@ -33,6 +33,38 @@ def build_reid_train_loader(cfg):
     domain_idx = 0
     camera_all = list()
 
+    # try to read a train_classes.csv mapping (cameraID,imageName,pid,Class)
+    train_classes_map = {}
+    class_to_idx = {}
+    class_idx_counter = 0
+    classes_path = os.path.join(_root, 'train_classes.csv')
+    def _norm_class_name(s: str) -> str:
+        key = "".join(ch.lower() for ch in s.strip() if ch.isalnum())
+        if key in {"container", "containers"}:
+            return "Container"
+        if key in {"rubbishbins", "rubbishbin", "trashbin", "trashbins", "bin", "bins", "wastebin", "wastebins"}:
+            return "RubbishBins"
+        if key in {"crosswalk", "crosswalks", "zebracrossing", "zebracrosswalk"}:
+            return "Crosswalk"
+        if key in {"trafficsign", "trafficsigns", "trafficsignal", "trafficsignals", "roadsign", "roadsigns"}:
+            return "TrafficSign"
+        return s.strip()
+    if os.path.exists(classes_path):
+        try:
+            import csv as _csv
+            with open(classes_path, newline='') as cf:
+                r = _csv.reader(cf)
+                header = next(r, None)
+                for cam, img, pid, cls in r:
+                    cls_n = _norm_class_name(cls)
+                    key = img.strip()
+                    if cls_n not in class_to_idx:
+                        class_to_idx[cls_n] = class_idx_counter
+                        class_idx_counter += 1
+                    train_classes_map[key] = class_to_idx[cls_n]
+        except Exception:
+            train_classes_map = {}
+
     # load datasets
     _root = cfg.DATASETS.ROOT_DIR
     for d in cfg.DATASETS.TRAIN:
@@ -42,18 +74,35 @@ def build_reid_train_loader(cfg):
             dataset = DATASET_REGISTRY.get(d)(root=_root, combineall=cfg.DATASETS.COMBINEALL)
         if comm.is_main_process():
             dataset.show_train()
-        if len(dataset.train[0]) < 4:
-            for i, x in enumerate(dataset.train):
-                add_info = {}  # dictionary
+        # Ensure every train item has an add_info dict at index 3 with 'domains' and optional 'class'
+        for i, item in enumerate(dataset.train):
+            add_info = {}
+            if cfg.DATALOADER.CAMERA_TO_DOMAIN:
+                add_info['domains'] = dataset.train[i][2]
+                camera_all.append(dataset.train[i][2])
+            else:
+                add_info['domains'] = int(domain_idx)
 
-                if cfg.DATALOADER.CAMERA_TO_DOMAIN:
-                    add_info['domains'] = dataset.train[i][2]
-                    camera_all.append(dataset.train[i][2])
+            # attempt to attach class id (if available in train_classes.csv)
+            try:
+                img_path = dataset.train[i][1]
+                # imageName in train_classes.csv may include prefixes like 'urban/0001.jpg'
+                # we try full, then basename
+                cls_id = None
+                if img_path in train_classes_map:
+                    cls_id = train_classes_map[img_path]
                 else:
-                    add_info['domains'] = int(domain_idx)
-                dataset.train[i] = list(dataset.train[i])
-                dataset.train[i].append(add_info)
-                dataset.train[i] = tuple(dataset.train[i])
+                    img_basename = os.path.basename(img_path)
+                    if img_basename in train_classes_map:
+                        cls_id = train_classes_map[img_basename]
+                if cls_id is not None:
+                    add_info['class'] = int(cls_id)
+            except Exception:
+                pass
+
+            dataset.train[i] = list(dataset.train[i])
+            dataset.train[i].append(add_info)
+            dataset.train[i] = tuple(dataset.train[i])
         domain_idx += 1
         train_items.extend(dataset.train)
 

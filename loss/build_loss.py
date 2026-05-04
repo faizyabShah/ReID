@@ -38,12 +38,12 @@ def build_loss(cfg, num_classes):
         print("label smooth on, numclasses:", num_classes)
 
     if sampler == 'softmax': # softmax loss only
-        def loss_func(score, feat, target):
+        def loss_func(score, feat, target, class_labels=None):
             return F.cross_entropy(score, target)
 
     # softmax & triplet
     elif cfg.DATALOADER.SAMPLER == 'softmax_triplet' or 'GS':
-        def loss_func(score, feat, target, domains=None, t_domains=None, all_posvid=None, soft_label=False, soft_weight=0.1, soft_lambda=0.2):
+        def loss_func(score, feat, target, domains=None, t_domains=None, all_posvid=None, soft_label=False, soft_weight=0.1, soft_lambda=0.2, class_labels=None):
             if cfg.MODEL.METRIC_LOSS_TYPE == 'triplet':
                 if cfg.MODEL.IF_LABELSMOOTH == 'on':
                     if name == 'local_attention_vit' and cfg.MODEL.PC_LOSS:
@@ -53,18 +53,18 @@ def build_loss(cfg, num_classes):
                 else:
                     ID_LOSS = F.cross_entropy(score, target)
 
-                TRI_LOSS = triplet(feat, target)[0]
+                TRI_LOSS = triplet(feat, target, class_labels=class_labels)[0]
                 # DOMAIN_LOSS = xent(domains, t_domains)
                 return cfg.MODEL.ID_LOSS_WEIGHT * ID_LOSS + \
                                cfg.MODEL.TRIPLET_LOSS_WEIGHT * TRI_LOSS
             elif cfg.MODEL.METRIC_LOSS_TYPE == 'triplet_center':
                 if cfg.MODEL.IF_LABELSMOOTH == 'on':
                     return xent(score, target) + \
-                        triplet(feat, target)[0] + \
+                        triplet(feat, target, class_labels=class_labels)[0] + \
                         cfg.SOLVER.CENTER_LOSS_WEIGHT * center_criterion(feat, target)
                 else:
                     return F.cross_entropy(score, target) + \
-                            triplet(feat, target)[0] + \
+                            triplet(feat, target, class_labels=class_labels)[0] + \
                             cfg.SOLVER.CENTER_LOSS_WEIGHT * center_criterion(feat, target)
             else:
                 print('expected METRIC_LOSS_TYPE with center should be center, triplet_center'
