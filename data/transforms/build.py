@@ -41,7 +41,7 @@ class Solarization(object):
         else:
             return img
 
-def build_transforms(cfg, is_train=True, is_fake=False):
+def build_transforms(cfg, is_train=True, is_fake=False, include_flip=True, skip_cj=False, skip_rea=False):
     res = []
 
     if is_train:
@@ -87,14 +87,14 @@ def build_transforms(cfg, is_train=True, is_fake=False):
         if do_autoaug:
             res.append(AutoAugment(total_iter))
         res.append(T.Resize(size_train, interpolation=3))
-        if do_flip:
+        if do_flip and include_flip:
             res.append(T.RandomHorizontalFlip(p=flip_prob))
         if do_pad:
             res.extend([T.Pad(padding, padding_mode=padding_mode),
                         T.RandomCrop(size_train)])
         if do_lgt:
             res.append(LGT(lgt_prob))
-        if do_cj:
+        if do_cj and not skip_cj:
             res.append(T.RandomApply([T.ColorJitter(cj_brightness, cj_contrast, cj_saturation, cj_hue)], p=cj_prob))
         if do_augmix:
             res.append(AugMix())
@@ -114,7 +114,7 @@ def build_transforms(cfg, is_train=True, is_fake=False):
             T.ToTensor(),
             T.Normalize([0.5,0.5,0.5],[0.5,0.5,0.5])
         ])
-        if do_rea:
+        if do_rea and not skip_rea:
             from timm.data.random_erasing import RandomErasing as RE
             res.append(RE(probability=rea_prob, mode='pixel', max_count=1, device='cpu'))
     else:
@@ -125,3 +125,48 @@ def build_transforms(cfg, is_train=True, is_fake=False):
             T.Normalize([0.5,0.5,0.5],[0.5,0.5,0.5])
         ])
     return T.Compose(res)
+
+def build_class_transforms(class_label, size_train):
+    """Class-specific augmentation Compose. Operates on normalized tensors."""
+    h, w = size_train[0], size_train[1]
+
+    _LABEL_MAP = {
+        'RubbishBins': 'rubbish_bin',
+        'Container':   'container',
+        'trafficsignal': 'traffic_sign',
+        'Crosswalk':   'crosswalk',
+    }
+    key = _LABEL_MAP.get(class_label, class_label)
+
+    if key == 'traffic_sign':
+        return T.Compose([
+            T.RandomPerspective(distortion_scale=0.3, p=0.5),
+            T.RandomRotation(degrees=20),
+            T.RandomResizedCrop(size=(h, w), scale=(0.65, 1.0)),
+            T.RandomErasing(p=0.25, scale=(0.02, 0.10)),
+        ])
+    elif key == 'crosswalk':
+        # ratio=(0.5, 2.0) allows both portrait and landscape crops
+        return T.Compose([
+            T.RandomHorizontalFlip(p=0.5),
+            T.RandomResizedCrop(size=(h, w), scale=(0.7, 1.0), ratio=(0.5, 2.0)),
+            T.RandomRotation(degrees=5),
+        ])
+    elif key == 'rubbish_bin':
+        return T.Compose([
+            T.RandomPerspective(distortion_scale=0.45, p=0.6),
+            T.RandomHorizontalFlip(p=0.5),
+            T.RandomRotation(degrees=15),
+            T.RandomResizedCrop(size=(h, w), scale=(0.7, 1.0)),
+            T.RandomErasing(p=0.3, scale=(0.05, 0.25)),
+        ])
+    elif key == 'container':
+        return T.Compose([
+            T.RandomPerspective(distortion_scale=0.4, p=0.65),
+            T.RandomHorizontalFlip(p=0.5),
+            T.RandomRotation(degrees=10),
+            T.RandomResizedCrop(size=(h, w), scale=(0.75, 1.0)),
+            T.RandomErasing(p=0.35, scale=(0.05, 0.20)),
+        ])
+    return None
+

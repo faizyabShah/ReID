@@ -118,6 +118,10 @@ _C.INPUT.LGT.PROB = 0.2
 _C.INPUT.RPT = CN()
 _C.INPUT.RPT.ENABLED = False
 _C.INPUT.RPT.PROB = 0.5
+# Class-specific augmentation
+_C.INPUT.CLASS_SPECIFIC_AUG = CN()
+_C.INPUT.CLASS_SPECIFIC_AUG.ENABLED = False
+
 
 # -----------------------------------------------------------------------------
 # Dataset

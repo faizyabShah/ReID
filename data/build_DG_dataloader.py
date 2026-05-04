@@ -27,11 +27,22 @@ def build_reid_train_loader(cfg):
         num_workers = 0
     else:
         num_workers = cfg.DATALOADER.NUM_WORKERS
+    include_flip = not cfg.INPUT.CLASS_SPECIFIC_AUG.ENABLED
+    train_transforms = build_transforms(cfg, is_train=True, is_fake=False, include_flip=include_flip)
+    
+    class_global_transform_map = {}
+    if cfg.INPUT.CLASS_SPECIFIC_AUG.ENABLED:
+        train_transforms_traffic_sign = build_transforms(
+            cfg, is_train=True, is_fake=False,
+            include_flip=False, skip_cj=True, skip_rea=True
+        )
+        # raw CSV label → override global transform
+        class_global_transform_map['trafficsignal'] = train_transforms_traffic_sign
 
-    train_transforms = build_transforms(cfg, is_train=True, is_fake=False)
     train_items = list()
     domain_idx = 0
     camera_all = list()
+    class_label_map = {}
 
     # load datasets
     _root = cfg.DATASETS.ROOT_DIR
@@ -56,8 +67,24 @@ def build_reid_train_loader(cfg):
                 dataset.train[i] = tuple(dataset.train[i])
         domain_idx += 1
         train_items.extend(dataset.train)
+        if hasattr(dataset, 'train_class_map'):
+            class_label_map.update(dataset.train_class_map)
+        
+    class_aug_dict = {}
+    if cfg.INPUT.CLASS_SPECIFIC_AUG.ENABLED:
+        from .transforms.build import build_class_transforms
+        size_train = cfg.INPUT.SIZE_TRAIN
+        for raw_label in set(class_label_map.values()):
+            aug = build_class_transforms(raw_label, size_train)
+            if aug is not None:
+                class_aug_dict[raw_label] = aug
 
-    train_set = CommDataset(train_items, train_transforms, relabel=True)
+        train_set = CommDataset(train_items, train_transforms, relabel=True,
+                            class_label_map=class_label_map,
+                            class_aug_dict=class_aug_dict,
+                            class_global_transform_map=class_global_transform_map)
+
+
 
     train_loader = make_sampler(
         train_set=train_set,

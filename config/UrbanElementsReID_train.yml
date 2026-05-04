@@ -13,8 +13,6 @@ MODEL:
 INPUT:
   SIZE_TRAIN: [256,128]
   SIZE_TEST: [256,128]
-  REA:
-    ENABLED: False
   PIXEL_MEAN: [0.5, 0.5, 0.5]
   PIXEL_STD: [0.5, 0.5, 0.5]
   LGT: # Local Grayscale Transfomation
@@ -30,6 +28,8 @@ INPUT:
   REA:
     ENABLED: True
     PROB: 0.5
+  CLASS_SPECIFIC_AUG:
+    ENABLED: True
 
 
 DATASETS:
