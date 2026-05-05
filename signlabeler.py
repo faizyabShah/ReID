@@ -647,7 +647,7 @@ def build_prototypes(csv_path, image_dir, reid_checkpoint, reid_backbone,
         features = []
 
         paths = [os.path.join(image_dir, n) for n in group["imageName"]]
-        batch_size = 64
+        batch_size = 8
 
         for i in range(0, len(paths), batch_size):
             batch_paths = paths[i:i + batch_size]
@@ -677,7 +677,13 @@ def build_prototypes(csv_path, image_dir, reid_checkpoint, reid_backbone,
                     else:
                         feats = out
             features.append(feats.cpu())
+
+        if not features:
+            print(f"  Skipping {sign_type}: no valid features extracted")
+            continue
+
         # L2 normalize each feature, then average, then normalize again
+        all_feats = torch.cat(features, dim=0)
         all_feats = F.normalize(all_feats, dim=1)
         prototype = all_feats.mean(dim=0)
         prototype = F.normalize(prototype, dim=0)
