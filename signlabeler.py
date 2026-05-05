@@ -505,30 +505,79 @@ def build_prototypes(csv_path, image_dir, reid_checkpoint, reid_backbone,
     print(f"Front-view signs for prototypes: {len(front_signs)}")
 
     # ── Load ReID backbone ──
-    # Your PAT model: vit_large_patch16_224_TransReID with 1024 feature dim
+    # Load your custom PAT model (from make_model.py)
     print(f"\nLoading ReID backbone: {reid_backbone}")
 
     if reid_backbone == "vit_large":
-        from torchvision.models import vit_l_16
-        backbone = vit_l_16(weights=None)
+        # Import your custom PAT model architecture
+        from model.make_model import build_part_attention_vit
+        from model.backbones.vit_pytorch import part_attention_vit_large
+        from config import cfg  # You may need to load your config
+
+        # Dummy config for model initialization
+        class DummyConfig:
+            class MODEL:
+                TRANSFORMER_TYPE = 'vit_large_patch16_224_TransReID'
+                STRIDE_SIZE = 16
+                DROP_PATH = 0.1
+                DROP_OUT = 0.0
+                ATT_DROP_RATE = 0.0
+                PRETRAIN_PATH = ""
+                PRETRAIN_CHOICE = 'imagenet'
+                COS_LAYER = False
+                NECK = 'bnneck'
+            class INPUT:
+                SIZE_TRAIN = [256, 128]
+            class TEST:
+                NECK_FEAT = 'after'
+                CLS_FUSION = False
+
+        dummy_cfg = DummyConfig()
+        factory = {'vit_large_patch16_224_TransReID': part_attention_vit_large}
+
+        backbone = build_part_attention_vit(num_classes=1000, cfg=dummy_cfg,
+                                             factory=factory, pretrain_tag='imagenet')
         feat_dim = 1024
+
+        # Load checkpoint into PAT model
         ckpt = torch.load(reid_checkpoint, map_location=device)
-        # Handle checkpoint structure: 'model' > 'state_dict' > raw dict
         state = ckpt.get("model", ckpt.get("state_dict", ckpt))
-        cleaned = {k.replace("module.", ""): v for k, v in state.items()
-                   if "classifier" not in k and "bottleneck" not in k}
-        backbone.load_state_dict(cleaned, strict=False)
-        backbone.heads = nn.Identity()
+        backbone.load_state_dict(state, strict=False)
+        print(f"✅ Loaded PAT checkpoint: {reid_checkpoint}")
+
     elif reid_backbone == "vit_base":
-        from torchvision.models import vit_b_16
-        backbone = vit_b_16(weights=None)
+        from model.make_model import build_part_attention_vit
+        from model.backbones.vit_pytorch import part_attention_vit_base
+
+        class DummyConfig:
+            class MODEL:
+                TRANSFORMER_TYPE = 'vit_base_patch16_224_TransReID'
+                STRIDE_SIZE = 16
+                DROP_PATH = 0.1
+                DROP_OUT = 0.0
+                ATT_DROP_RATE = 0.0
+                PRETRAIN_PATH = ""
+                PRETRAIN_CHOICE = 'imagenet'
+                COS_LAYER = False
+                NECK = 'bnneck'
+            class INPUT:
+                SIZE_TRAIN = [256, 128]
+            class TEST:
+                NECK_FEAT = 'after'
+                CLS_FUSION = False
+
+        dummy_cfg = DummyConfig()
+        factory = {'vit_base_patch16_224_TransReID': part_attention_vit_base}
+
+        backbone = build_part_attention_vit(num_classes=1000, cfg=dummy_cfg,
+                                             factory=factory, pretrain_tag='imagenet')
         feat_dim = 768
+
         ckpt = torch.load(reid_checkpoint, map_location=device)
         state = ckpt.get("model", ckpt.get("state_dict", ckpt))
-        cleaned = {k.replace("module.", ""): v for k, v in state.items()
-                   if "classifier" not in k and "bottleneck" not in k}
-        backbone.load_state_dict(cleaned, strict=False)
-        backbone.heads = nn.Identity()
+        backbone.load_state_dict(state, strict=False)
+        print(f"✅ Loaded PAT checkpoint: {reid_checkpoint}")
+
     elif reid_backbone == "resnet50":
         backbone = models.resnet50(weights=None)
         feat_dim = 2048
@@ -579,11 +628,21 @@ def build_prototypes(csv_path, image_dir, reid_checkpoint, reid_backbone,
 
             batch = torch.stack(imgs).to(device)
             with torch.no_grad():
-                feats = backbone(batch)
-                # ViT outputs [B, N, D] where N includes CLS + patches
-                # Extract CLS token (index 0) if needed
-                if feats.dim() == 3:
-                    feats = feats[:, 0, :]  # CLS token
+                out = backbone(batch)
+                # PAT model returns: (cls_score, layerwise_cls_tokens, layerwise_part_tokens)
+                # or just layerwise tokens depending on training mode
+                if isinstance(out, tuple):
+                    # Training mode: (cls_score, layerwise_cls_tokens, layerwise_part_tokens)
+                    feats = out[1][-1] if len(out) > 1 else out[0]  # Last layer CLS token
+                elif isinstance(out, list):
+                    # Inference mode: list of layerwise tokens
+                    feats = out[-1][:, 0]  # Last layer CLS token
+                else:
+                    # Single tensor output
+                    if out.dim() == 3:
+                        feats = out[:, 0, :]  # CLS token
+                    else:
+                        feats = out
             features.append(feats.cpu())
         # L2 normalize each feature, then average, then normalize again
         all_feats = F.normalize(all_feats, dim=1)
