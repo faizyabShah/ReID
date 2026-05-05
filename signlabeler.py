@@ -207,11 +207,25 @@ WILDCARD_TYPES = frozenset({"sign_back", "unknown"})
 def load_gtsrb_classifier(device):
     """Load bazyl/gtsrb-model from HuggingFace."""
     from transformers import ViTForImageClassification, ViTImageProcessor
+    import json
+    from pathlib import Path
+    from huggingface_hub import hf_hub_download
 
     model_name = "bazyl/gtsrb-model"
     processor = ViTImageProcessor.from_pretrained(model_name)
-    # Use trust_model_config=True to bypass strict validation of the model's id2label
-    model = ViTForImageClassification.from_pretrained(model_name, trust_model_config=True)
+
+    # Download config and fix the id2label (remove None value for class 43)
+    config_path = hf_hub_download(repo_id=model_name, filename="config.json")
+    with open(config_path, 'r') as f:
+        config_dict = json.load(f)
+
+    # Fix id2label: remove the None value
+    if 'id2label' in config_dict and config_dict['id2label']:
+        config_dict['id2label'] = {k: v for k, v in config_dict['id2label'].items() if v is not None}
+        with open(config_path, 'w') as f:
+            json.dump(config_dict, f)
+
+    model = ViTForImageClassification.from_pretrained(model_name)
     model = model.to(device)
     model.eval()
     print(f"Loaded: {model_name}")
