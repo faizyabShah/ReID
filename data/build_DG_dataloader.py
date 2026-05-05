@@ -214,13 +214,22 @@ def fast_batch_collator(batched_inputs):
 
 def make_sampler(train_set, num_batch, num_instance, num_workers,
                  mini_batch_size, drop_last=True, flag1=True, flag2=True, seed=None, cfg=None):
-
-    if flag1:
-        data_sampler = samplers.RandomIdentitySampler(train_set.img_items,
-                                                      mini_batch_size, num_instance)
+    # Optionally use class-balanced sampling when requested in config.
+    if cfg is not None and getattr(cfg.DATALOADER, 'CLASS_BALANCE', False):
+        try:
+            data_sampler = samplers.ClassBalancedIdentitySampler(train_set.img_items,
+                                                                  mini_batch_size, num_instance)
+        except Exception:
+            # Fallback to random identity sampler if class-balanced cannot be constructed
+            data_sampler = samplers.RandomIdentitySampler(train_set.img_items,
+                                                          mini_batch_size, num_instance)
     else:
-        data_sampler = samplers.DomainSuffleSampler(train_set.img_items,
-                                                     num_batch, num_instance, flag2, seed, cfg)
+        if flag1:
+            data_sampler = samplers.RandomIdentitySampler(train_set.img_items,
+                                                          mini_batch_size, num_instance)
+        else:
+            data_sampler = samplers.DomainSuffleSampler(train_set.img_items,
+                                                         num_batch, num_instance, flag2, seed, cfg)
     batch_sampler = torch.utils.data.sampler.BatchSampler(data_sampler, mini_batch_size, drop_last)
     train_loader = torch.utils.data.DataLoader(
         train_set,
