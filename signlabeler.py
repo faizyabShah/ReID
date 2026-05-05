@@ -432,7 +432,6 @@ def label_test(csv_path, image_dir, output_path):
     print(f"Device: {device}")
 
     df = pd.read_csv(csv_path)
-    df = ensure_object_id(df)
     sign_mask = get_sign_mask(df)
     signs = df[sign_mask].copy()
     print(f"Traffic signs: {len(signs)} images")
