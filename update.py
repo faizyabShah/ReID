@@ -2,6 +2,7 @@ import os
 import csv
 import torch
 import argparse
+import pandas as pd
 
 import numpy as np
 from config import cfg
@@ -17,11 +18,17 @@ from processor.part_attention_vit_processor import do_inference as do_inf_pat
 def read_classes_from_csv(csv_path):
     """Reads the CSV and returns a list of classes in order."""
     classes = []
-    with open(csv_path, 'r') as f:
-        reader = csv.reader(f)
-        next(reader)  # Skip the header (cameraID, imageName, Class)
-        for row in reader:
-            classes.append(row[2])  # The Class is the 3rd column
+    with open(csv_path, 'r', newline='') as f:
+        reader = csv.DictReader(f)
+        if reader.fieldnames and "Class" in reader.fieldnames:
+            for row in reader:
+                classes.append(row.get("Class"))
+        else:
+            f.seek(0)
+            reader = csv.reader(f)
+            next(reader, None)
+            for row in reader:
+                classes.append(row[2] if len(row) > 2 else None)
     return classes
 
 def apply_class_penalty(dist_mat, query_classes, gallery_classes):
@@ -87,6 +94,123 @@ def normalize_class_name(class_name):
         return "traffic"
     return normalized
 
+def read_sign_types_from_csv(csv_path):
+    """Return {imageName: (sign_type, viewpoint)}."""
+    df = pd.read_csv(csv_path)
+    if "imageName" not in df.columns:
+        raise ValueError(f"CSV missing required column: imageName ({csv_path})")
+    sign_col = "sign_type" if "sign_type" in df.columns else None
+    view_col = "viewpoint" if "viewpoint" in df.columns else None
+
+    mapping = {}
+    for _, row in df.iterrows():
+        key = str(row["imageName"]).replace("\\", "/").lstrip("./")
+        sign_type = row[sign_col] if sign_col else None
+        viewpoint = row[view_col] if view_col else None
+        sign_type = None if pd.isna(sign_type) else str(sign_type)
+        viewpoint = None if pd.isna(viewpoint) else str(viewpoint)
+        mapping[key] = (sign_type, viewpoint)
+    return mapping
+
+def resolve_existing_path(*candidates):
+    for path in candidates:
+        if path and os.path.exists(path):
+            return path
+    return None
+
+def _safe_rel_image_key(img_path, base_dir):
+    img_path = os.path.abspath(img_path)
+    if base_dir:
+        try:
+            base_dir = os.path.abspath(base_dir)
+            if os.path.commonpath([base_dir, img_path]) == base_dir:
+                rel = os.path.relpath(img_path, base_dir)
+                return rel.replace("\\", "/")
+        except Exception:
+            pass
+    return os.path.basename(img_path)
+
+def load_prototypes(bank_path):
+    bank = torch.load(bank_path, map_location="cpu")
+    prototypes = bank.get("prototypes", {})
+    if not prototypes:
+        raise ValueError(f"No prototypes found in {bank_path}")
+    types = list(prototypes.keys())
+    proto_mat = torch.stack([prototypes[t].cpu() for t in types], dim=0).numpy()
+    proto_norm = np.linalg.norm(proto_mat, axis=1, keepdims=True)
+    proto_mat = proto_mat / np.maximum(proto_norm, 1e-12)
+    return types, proto_mat
+
+def apply_prototype_filter(dist_mat, qf, q_keys, g_keys, query_sign_map, gallery_sign_map,
+                           proto_types, proto_mat, proto_margin=0.05, penalty=1e6,
+                           query_classes=None):
+    q_sign_types = []
+    q_viewpoints = []
+    q_missing = 0
+    for key in q_keys:
+        item = query_sign_map.get(key) or query_sign_map.get(os.path.basename(key))
+        if not item:
+            q_missing += 1
+            q_sign_types.append(None)
+            q_viewpoints.append(None)
+        else:
+            q_sign_types.append(item[0])
+            q_viewpoints.append(item[1])
+
+    g_sign_types = []
+    g_viewpoints = []
+    g_missing = 0
+    for key in g_keys:
+        item = gallery_sign_map.get(key) or gallery_sign_map.get(os.path.basename(key))
+        if not item:
+            g_missing += 1
+            g_sign_types.append(None)
+            g_viewpoints.append(None)
+        else:
+            g_sign_types.append(item[0])
+            g_viewpoints.append(item[1])
+
+    q_sign_types = np.array(q_sign_types, dtype=object)
+    q_viewpoints = np.array(q_viewpoints, dtype=object)
+    g_sign_types = np.array(g_sign_types, dtype=object)
+    g_viewpoints = np.array(g_viewpoints, dtype=object)
+
+    if q_missing or g_missing:
+        print(f"[proto] Missing sign labels: query={q_missing}, gallery={g_missing}")
+
+    if proto_mat.shape[1] != qf.shape[1]:
+        print("[proto] Prototype dim mismatch; skipping filter.")
+        return dist_mat
+
+    filtered = 0
+    fallback = 0
+    for i in range(qf.shape[0]):
+        if query_classes is not None:
+            if normalize_class_name(query_classes[i]) != "traffic":
+                continue
+        q_type = q_sign_types[i]
+        q_view = q_viewpoints[i]
+        if q_view == "back" or q_type in {"sign_back", "unknown", None}:
+            continue
+
+        sims = proto_mat @ qf[i]
+        if sims.size < 2:
+            continue
+        best_idx = int(np.argmax(sims))
+        second_idx = int(np.argsort(sims)[-2])
+        margin = sims[best_idx] - sims[second_idx]
+        if margin < proto_margin:
+            fallback += 1
+            continue
+
+        best_type = proto_types[best_idx]
+        allowed = (g_sign_types == best_type) | (g_viewpoints == "back") | (g_sign_types == "sign_back")
+        dist_mat[i, ~allowed] += penalty
+        filtered += 1
+
+    print(f"[proto] Applied filter to {filtered} queries (fallback: {fallback})")
+    return dist_mat
+
 def _extract_rerank_params(param_node):
     return {
         "k1": int(param_node.K1),
@@ -139,6 +263,7 @@ def extract_feature(model, dataloaders, num_query):
     for data in dataloaders:
         img = data['images']
         camid = data['camid']
+        img_path.extend(data.get("img_path", []))
         #obtain values form dict data
         n, c, h, w = img.size()
         count += n
@@ -162,10 +287,12 @@ def extract_feature(model, dataloaders, num_query):
     # query
     qf = features[:num_query]
     q_camids = camids[:num_query]
+    q_paths = img_path[:num_query]
     # gallery
     gf = features[num_query:]
     g_camids = camids[num_query:]
-    return qf, gf, q_camids, g_camids
+    g_paths = img_path[num_query:]
+    return qf, gf, q_camids, g_camids, q_paths, g_paths
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="ReID Training")
@@ -177,6 +304,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--track", default="./config/PAT.yml", help="path to config file", type=str
     )
+    parser.add_argument("--prototype_bank", default=None, type=str,
+                        help="Path to sign_type_prototypes.pkl")
+    parser.add_argument("--query_sign_types", default=None, type=str,
+                        help="Path to query_sign_types.csv")
+    parser.add_argument("--gallery_sign_types", default=None, type=str,
+                        help="Path to test_sign_types.csv")
+    parser.add_argument("--proto_margin", default=0.05, type=float,
+                        help="Prototype confidence margin for filtering")
     args = parser.parse_args()
 
     if args.config_file != "":
@@ -210,7 +345,7 @@ if __name__ == "__main__":
         else:
             do_inf(cfg, model, val_loader, num_query)
     with torch.no_grad():
-        qf, gf, q_camids, g_camids = extract_feature(model, val_loader, num_query)
+        qf, gf, q_camids, g_camids, q_paths, g_paths = extract_feature(model, val_loader, num_query)
 
     # save feature
     qf=qf.cpu().numpy()
@@ -253,6 +388,51 @@ if __name__ == "__main__":
             same_cam_penalty=cfg.TEST.CAJ_SAME_CAM_PENALTY,
             cross_cam_scale=cfg.TEST.CAJ_CROSS_CAM_SCALE,
         )
+
+    # Prototype-based filtering for traffic signs (optional)
+    proto_bank = resolve_existing_path(
+        args.prototype_bank,
+        os.path.join(os.getcwd(), "sign_type_prototypes.pkl"),
+        os.path.join(cfg.DATASETS.ROOT_DIR, "sign_type_prototypes.pkl"),
+    )
+    query_sign_csv = resolve_existing_path(
+        args.query_sign_types,
+        os.path.join(os.getcwd(), "query_sign_types.csv"),
+        os.path.join(cfg.DATASETS.ROOT_DIR, "query_sign_types.csv"),
+    )
+    gallery_sign_csv = resolve_existing_path(
+        args.gallery_sign_types,
+        os.path.join(os.getcwd(), "test_sign_types.csv"),
+        os.path.join(cfg.DATASETS.ROOT_DIR, "test_sign_types.csv"),
+    )
+
+    if proto_bank and query_sign_csv and gallery_sign_csv:
+        try:
+            proto_types, proto_mat = load_prototypes(proto_bank)
+            query_sign_map = read_sign_types_from_csv(query_sign_csv)
+            gallery_sign_map = read_sign_types_from_csv(gallery_sign_csv)
+            query_dir = os.path.join(cfg.DATASETS.ROOT_DIR, "image_query")
+            gallery_dir = os.path.join(cfg.DATASETS.ROOT_DIR, "image_test")
+            q_keys = [_safe_rel_image_key(p, query_dir) for p in q_paths]
+            g_keys = [_safe_rel_image_key(p, gallery_dir) for p in g_paths]
+
+            re_rank_dist = apply_prototype_filter(
+                re_rank_dist,
+                qf,
+                q_keys,
+                g_keys,
+                query_sign_map,
+                gallery_sign_map,
+                proto_types,
+                proto_mat,
+                proto_margin=args.proto_margin,
+                penalty=1e6,
+                query_classes=query_classes,
+            )
+        except Exception as e:
+            print(f"[proto] Skipping prototype filter: {e}")
+    else:
+        print("[proto] Prototype filter disabled (missing files).")
 
     if cfg.TEST.DO_CLASS_FILTER:
         re_rank_dist = apply_class_penalty(re_rank_dist, query_classes, gallery_classes)
