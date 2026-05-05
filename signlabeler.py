@@ -206,26 +206,26 @@ WILDCARD_TYPES = frozenset({"sign_back", "unknown"})
 
 def load_gtsrb_classifier(device):
     """Load bazyl/gtsrb-model from HuggingFace."""
-    from transformers import ViTForImageClassification, ViTImageProcessor
-    import json
-    from pathlib import Path
-    from huggingface_hub import hf_hub_download
+    from transformers import AutoConfig, ViTForImageClassification, ViTImageProcessor
 
     model_name = "bazyl/gtsrb-model"
     processor = ViTImageProcessor.from_pretrained(model_name)
 
-    # Download config and fix the id2label (remove None value for class 43)
-    config_path = hf_hub_download(repo_id=model_name, filename="config.json")
-    with open(config_path, 'r') as f:
-        config_dict = json.load(f)
+    config = AutoConfig.from_pretrained(model_name)
+    if getattr(config, "id2label", None):
+        sanitized = {}
+        for k, v in config.id2label.items():
+            idx = int(k)
+            sanitized[idx] = v if v is not None else f"unknown_{idx}"
+        config.id2label = sanitized
+        config.label2id = {label: idx for idx, label in sanitized.items()}
+        config.num_labels = max(getattr(config, "num_labels", 0), len(sanitized))
 
-    # Fix id2label: remove the None value
-    if 'id2label' in config_dict and config_dict['id2label']:
-        config_dict['id2label'] = {k: v for k, v in config_dict['id2label'].items() if v is not None}
-        with open(config_path, 'w') as f:
-            json.dump(config_dict, f)
-
-    model = ViTForImageClassification.from_pretrained(model_name)
+    model = ViTForImageClassification.from_pretrained(
+        model_name,
+        config=config,
+        ignore_mismatched_sizes=True,
+    )
     model = model.to(device)
     model.eval()
     print(f"Loaded: {model_name}")
