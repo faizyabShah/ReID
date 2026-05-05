@@ -96,13 +96,21 @@ import matplotlib.pyplot as plt
 
 COL_CLASS = "Class"
 COL_ID = "Corresponding Indexes"
-TRAFFIC_SIGN_LABEL = "TrafficSign"
+TRAFFIC_SIGN_LABELS = {
+    "trafficsign",
+    "traffic_sign",
+    "traffic sign",
+    "trafficsignal",
+    "traffic_signal",
+    "traffic signal",
+}
 
 
 def get_sign_mask(df):
     if COL_CLASS not in df.columns:
         raise ValueError(f"CSV missing required column: {COL_CLASS}")
-    return df[COL_CLASS] == TRAFFIC_SIGN_LABEL
+    class_col = df[COL_CLASS].astype(str).str.strip().str.lower()
+    return class_col.isin(TRAFFIC_SIGN_LABELS)
 
 
 def ensure_object_id(df):
