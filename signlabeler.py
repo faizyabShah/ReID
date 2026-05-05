@@ -210,7 +210,14 @@ def load_gtsrb_classifier(device):
 
     model_name = "bazyl/gtsrb-model"
     processor = ViTImageProcessor.from_pretrained(model_name)
-    model = ViTForImageClassification.from_pretrained(model_name)
+
+    # Load config and clean up id2label (remove None values for stricter validation)
+    from transformers import ViTConfig
+    config = ViTConfig.from_pretrained(model_name)
+    if hasattr(config, 'id2label') and config.id2label:
+        config.id2label = {k: v for k, v in config.id2label.items() if v is not None}
+
+    model = ViTForImageClassification.from_pretrained(model_name, config=config)
     model = model.to(device)
     model.eval()
     print(f"Loaded: {model_name}")
@@ -467,6 +474,26 @@ def label_test(csv_path, image_dir, output_path):
 # 5. BUILD PROTOTYPES (using your PAT model)
 # =============================================================================
 
+def _detect_model_type(state_dict):
+    """Auto-detect model type (vit_large, vit_base) from checkpoint."""
+    if 'base.blocks.23.norm1.weight' in state_dict:
+        return 'vit_large'
+    elif 'base.blocks.11.norm1.weight' in state_dict:
+        return 'vit_base'
+    elif 'classifier.weight' in state_dict:
+        hidden_dim = state_dict['classifier.weight'].shape[1]
+        return 'vit_large' if hidden_dim == 1024 else 'vit_base'
+    elif 'base.pos_embed' in state_dict:
+        hidden_dim = state_dict['base.pos_embed'].shape[2]
+        return 'vit_large' if hidden_dim == 1024 else 'vit_base'
+    return 'vit_large'
+
+def _detect_num_classes(state_dict):
+    """Auto-detect number of classes from checkpoint."""
+    if 'classifier.weight' in state_dict:
+        return state_dict['classifier.weight'].shape[0]
+    return 1000
+
 def build_prototypes(csv_path, image_dir, reid_checkpoint, reid_backbone,
                      output_path, min_samples=10):
     """
@@ -506,19 +533,21 @@ def build_prototypes(csv_path, image_dir, reid_checkpoint, reid_backbone,
 
     # ── Load ReID backbone ──
     # Load your custom PAT model (from make_model.py)
-    print(f"\nLoading ReID backbone: {reid_backbone}")
+    ckpt = torch.load(reid_checkpoint, map_location=device)
+    state = ckpt.get("model", ckpt.get("state_dict", ckpt))
+    num_classes = _detect_num_classes(state)
+
+    # Auto-detect if not provided
+    if reid_backbone is None:
+        reid_backbone = _detect_model_type(state)
+        print(f"\nAuto-detected backbone: {reid_backbone}")
+    else:
+        print(f"\nLoading ReID backbone: {reid_backbone}")
 
     if reid_backbone == "vit_large":
-        # Import your custom PAT model architecture
         from model.make_model import build_part_attention_vit
         from model.backbones.vit_pytorch import part_attention_vit_large
 
-        # Load checkpoint to detect num_classes
-        ckpt = torch.load(reid_checkpoint, map_location=device)
-        state = ckpt.get("model", ckpt.get("state_dict", ckpt))
-        num_classes = state.get('classifier.weight', torch.empty(1000, 1024)).shape[0]
-
-        # Dummy config for model initialization
         class DummyConfig:
             class MODEL:
                 TRANSFORMER_TYPE = 'vit_large_patch16_224_TransReID'
@@ -543,15 +572,11 @@ def build_prototypes(csv_path, image_dir, reid_checkpoint, reid_backbone,
                                              factory=factory, pretrain_tag='imagenet')
         feat_dim = 1024
         backbone.load_state_dict(state, strict=False)
-        print(f"✅ Loaded PAT checkpoint ({num_classes} classes): {reid_checkpoint}")
+        print(f"✅ Loaded PAT checkpoint ({num_classes} classes)")
 
     elif reid_backbone == "vit_base":
         from model.make_model import build_part_attention_vit
         from model.backbones.vit_pytorch import part_attention_vit_base
-
-        ckpt = torch.load(reid_checkpoint, map_location=device)
-        state = ckpt.get("model", ckpt.get("state_dict", ckpt))
-        num_classes = state.get('classifier.weight', torch.empty(1000, 768)).shape[0]
 
         class DummyConfig:
             class MODEL:
@@ -577,13 +602,11 @@ def build_prototypes(csv_path, image_dir, reid_checkpoint, reid_backbone,
                                              factory=factory, pretrain_tag='imagenet')
         feat_dim = 768
         backbone.load_state_dict(state, strict=False)
-        print(f"✅ Loaded PAT checkpoint ({num_classes} classes): {reid_checkpoint}")
+        print(f"✅ Loaded PAT checkpoint ({num_classes} classes)")
 
     elif reid_backbone == "resnet50":
         backbone = models.resnet50(weights=None)
         feat_dim = 2048
-        ckpt = torch.load(reid_checkpoint, map_location=device)
-        state = ckpt.get("model", ckpt.get("state_dict", ckpt))
         cleaned = {k.replace("module.", "").replace("backbone.", ""): v
                    for k, v in state.items() if "classifier" not in k}
         backbone.load_state_dict(cleaned, strict=False)
@@ -900,8 +923,9 @@ def main():
     p3.add_argument("--csv", required=True)
     p3.add_argument("--image_dir", required=True)
     p3.add_argument("--reid_checkpoint", required=True)
-    p3.add_argument("--reid_backbone", required=True,
-                    choices=["vit_large", "vit_base", "resnet50"])
+    p3.add_argument("--reid_backbone", required=False, default=None,
+                    choices=["vit_large", "vit_base", "resnet50"],
+                    help="Auto-detected from checkpoint if not provided")
     p3.add_argument("--output", required=True)
     p3.add_argument("--min_samples", type=int, default=10)
 
