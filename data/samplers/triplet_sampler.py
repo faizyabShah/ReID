@@ -272,6 +272,143 @@ class RandomIdentitySampler(Sampler):
     def __len__(self):
         return self.length
 
+
+class ClassBalancedIdentitySampler(Sampler):
+    """
+    Identity-balanced sampling across semantic classes.
+
+    Each identity contributes exactly `num_instances` images per selection,
+    and each batch tries to allocate identities equally across classes.
+    Example with 4 classes and num_pids_per_batch=8:
+    - 2 IDs per class, each with `num_instances` images.
+    """
+
+    def __init__(self, data_source, batch_size, num_instances):
+        self.data_source = data_source
+        self.batch_size = batch_size
+        self.num_instances = num_instances
+        self.num_pids_per_batch = self.batch_size // self.num_instances
+
+        # pid -> sample indices
+        self.index_dic = defaultdict(list)
+        # pid -> class id
+        self.pid_class = {}
+
+        for index, item in enumerate(self.data_source):
+            # Expect item layout from build_reid_train_loader:
+            # (img_path, pid, camid, {'domains': ..., 'class': ...})
+            pid = item[1]
+            cls = -1
+            if len(item) > 3 and isinstance(item[3], dict) and ('class' in item[3]):
+                cls = int(item[3]['class'])
+
+            self.index_dic[pid].append(index)
+            self.pid_class[pid] = cls
+
+        self.pids = list(self.index_dic.keys())
+        self.class_to_pids = defaultdict(list)
+        for pid in self.pids:
+            self.class_to_pids[self.pid_class[pid]].append(pid)
+
+        self.classes = sorted(self.class_to_pids.keys())
+
+        # Epoch length estimate similar to RandomIdentitySampler.
+        self.length = 0
+        for pid in self.pids:
+            num = len(self.index_dic[pid])
+            if num < self.num_instances:
+                num = self.num_instances
+            self.length += num - num % self.num_instances
+
+    def __iter__(self):
+        # Build per-pid chunks of size num_instances.
+        batch_idxs_dict = defaultdict(list)
+        for pid in self.pids:
+            idxs = copy.deepcopy(self.index_dic[pid])
+            if len(idxs) < self.num_instances:
+                idxs = np.random.choice(idxs, size=self.num_instances, replace=True).tolist()
+            elif len(idxs) % self.num_instances != 0:
+                pad = self.num_instances - (len(idxs) % self.num_instances)
+                idxs.extend(np.random.choice(idxs, size=pad, replace=False).tolist())
+
+            random.shuffle(idxs)
+            chunk = []
+            for idx in idxs:
+                chunk.append(int(idx))
+                if len(chunk) == self.num_instances:
+                    batch_idxs_dict[pid].append(chunk)
+                    chunk = []
+
+        # Keep only pids that still have available chunks.
+        available_by_class = {
+            cls: [pid for pid in pids if len(batch_idxs_dict[pid]) > 0]
+            for cls, pids in self.class_to_pids.items()
+        }
+
+        # Identity-level balancing: distribute num_pids_per_batch across classes.
+        num_classes = max(1, len(self.classes))
+        base = self.num_pids_per_batch // num_classes
+        rem = self.num_pids_per_batch % num_classes
+        pids_per_class = {
+            cls: base + (1 if i < rem else 0)
+            for i, cls in enumerate(self.classes)
+        }
+
+        final_idxs = []
+        while True:
+            batch_pids = []
+
+            for cls in self.classes:
+                need = pids_per_class[cls]
+                if need <= 0:
+                    continue
+                avail = available_by_class.get(cls, [])
+                if len(avail) == 0:
+                    continue
+
+                if len(avail) >= need:
+                    chosen = random.sample(avail, need)
+                else:
+                    chosen = random.choices(avail, k=need)
+
+                batch_pids.extend(chosen)
+
+            # Fill shortages from all remaining classes to keep batch size stable.
+            if len(batch_pids) < self.num_pids_per_batch:
+                all_avail = []
+                for cls in self.classes:
+                    all_avail.extend(available_by_class.get(cls, []))
+                if len(all_avail) == 0:
+                    break
+                short = self.num_pids_per_batch - len(batch_pids)
+                if len(all_avail) >= short:
+                    batch_pids.extend(random.sample(all_avail, short))
+                else:
+                    batch_pids.extend(random.choices(all_avail, k=short))
+
+            if len(batch_pids) == 0:
+                break
+
+            batch_indices = []
+            for pid in batch_pids[:self.num_pids_per_batch]:
+                if len(batch_idxs_dict[pid]) == 0:
+                    continue
+                batch_indices.extend(batch_idxs_dict[pid].pop(0))
+                if len(batch_idxs_dict[pid]) == 0:
+                    cls = self.pid_class[pid]
+                    if pid in available_by_class.get(cls, []):
+                        available_by_class[cls].remove(pid)
+
+            if len(batch_indices) < self.batch_size:
+                break
+
+            final_idxs.extend(batch_indices[:self.batch_size])
+
+        return iter(final_idxs)
+
+    def __len__(self):
+        return self.length
+
 class DomainSuffleSampler(Sampler):
 
     def __init__(self, data_source: str, batch_size: int, num_instances: int, delete_rem: bool, seed: Optional[int] = None, cfg = None):
