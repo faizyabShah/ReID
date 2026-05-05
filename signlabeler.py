@@ -106,6 +106,32 @@ TRAFFIC_SIGN_LABELS = {
 }
 
 
+def _read_cls_fusion_config(config_file):
+    if not config_file or not os.path.exists(config_file):
+        return False, 1
+    cls_fusion = False
+    cls_fusion_last = 1
+    in_test = False
+    with open(config_file, "r", encoding="utf-8") as f:
+        for line in f:
+            raw = line.strip()
+            if not raw or raw.startswith("#"):
+                continue
+            if not line.startswith(" ") and not line.startswith("\t"):
+                in_test = raw.startswith("TEST:")
+                continue
+            if in_test:
+                if raw.startswith("CLS_FUSION:"):
+                    value = raw.split(":", 1)[1].strip().lower()
+                    cls_fusion = value in {"true", "1", "yes", "on"}
+                elif raw.startswith("CLS_FUSION_LAST:"):
+                    try:
+                        cls_fusion_last = int(raw.split(":", 1)[1].strip())
+                    except ValueError:
+                        pass
+    return cls_fusion, cls_fusion_last
+
+
 def get_sign_mask(df):
     if COL_CLASS not in df.columns:
         raise ValueError(f"CSV missing required column: {COL_CLASS}")
@@ -511,7 +537,7 @@ def _detect_num_classes(state_dict):
     return 1000
 
 def build_prototypes(csv_path, image_dir, reid_checkpoint, reid_backbone,
-                     output_path, min_samples=10):
+                     output_path, min_samples=10, config_file=None):
     """
     Build one prototype vector per coarse sign type using your PAT model.
 
@@ -547,6 +573,14 @@ def build_prototypes(csv_path, image_dir, reid_checkpoint, reid_backbone,
 
     print(f"Front-view signs for prototypes: {len(front_signs)}")
 
+    if config_file is None:
+        default_cfg = os.path.join(os.path.dirname(__file__), "config",
+                                   "UrbanElementsReID_test.yml")
+        config_file = default_cfg if os.path.exists(default_cfg) else None
+    cls_fusion, cls_fusion_last = _read_cls_fusion_config(config_file)
+    if cls_fusion:
+        print(f"Using CLS fusion for prototypes (last {cls_fusion_last} layers)")
+
     # ── Load ReID backbone ──
     # Load your custom PAT model (from make_model.py)
     ckpt = torch.load(reid_checkpoint, map_location=device)
@@ -579,14 +613,15 @@ def build_prototypes(csv_path, image_dir, reid_checkpoint, reid_backbone,
                 SIZE_TRAIN = [256, 128]
             class TEST:
                 NECK_FEAT = 'after'
-                CLS_FUSION = False
+                CLS_FUSION = cls_fusion
+                CLS_FUSION_LAST = cls_fusion_last
 
         dummy_cfg = DummyConfig()
         factory = {'vit_large_patch16_224_TransReID': part_attention_vit_large}
 
         backbone = build_part_attention_vit(num_classes=num_classes, cfg=dummy_cfg,
                                              factory=factory, pretrain_tag='imagenet')
-        feat_dim = 1024
+        feat_dim = 1024 * (cls_fusion_last if cls_fusion else 1)
         backbone.load_state_dict(state, strict=False)
         print(f"✅ Loaded PAT checkpoint ({num_classes} classes)")
 
@@ -609,14 +644,15 @@ def build_prototypes(csv_path, image_dir, reid_checkpoint, reid_backbone,
                 SIZE_TRAIN = [256, 128]
             class TEST:
                 NECK_FEAT = 'after'
-                CLS_FUSION = False
+                CLS_FUSION = cls_fusion
+                CLS_FUSION_LAST = cls_fusion_last
 
         dummy_cfg = DummyConfig()
         factory = {'vit_base_patch16_224_TransReID': part_attention_vit_base}
 
         backbone = build_part_attention_vit(num_classes=num_classes, cfg=dummy_cfg,
                                              factory=factory, pretrain_tag='imagenet')
-        feat_dim = 768
+        feat_dim = 768 * (cls_fusion_last if cls_fusion else 1)
         backbone.load_state_dict(state, strict=False)
         print(f"✅ Loaded PAT checkpoint ({num_classes} classes)")
 
@@ -950,6 +986,8 @@ def main():
                     help="Auto-detected from checkpoint if not provided")
     p3.add_argument("--output", required=True)
     p3.add_argument("--min_samples", type=int, default=10)
+    p3.add_argument("--config_file", required=False, default=None,
+                    help="Config file to read CLS_FUSION settings from")
 
     p4 = sub.add_parser("sanity_check")
     p4.add_argument("--csv", required=True)
@@ -964,7 +1002,8 @@ def main():
         label_test(args.csv, args.image_dir, args.output)
     elif args.cmd == "build_prototypes":
         build_prototypes(args.csv, args.image_dir, args.reid_checkpoint,
-                         args.reid_backbone, args.output, args.min_samples)
+                         args.reid_backbone, args.output, args.min_samples,
+                         args.config_file)
     elif args.cmd == "sanity_check":
         sanity_check(args.csv, args.image_dir, args.output_dir)
 
