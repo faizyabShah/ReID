@@ -209,22 +209,23 @@ def load_gtsrb_classifier(device):
     from transformers import AutoConfig, ViTForImageClassification, ViTImageProcessor
 
     model_name = "bazyl/gtsrb-model"
+    target_num_labels = 44
     processor = ViTImageProcessor.from_pretrained(model_name)
 
     config = AutoConfig.from_pretrained(model_name)
-    if getattr(config, "id2label", None):
-        sanitized = {}
-        for k, v in config.id2label.items():
-            idx = int(k)
-            sanitized[idx] = v if v is not None else f"unknown_{idx}"
-        config.id2label = sanitized
-        config.label2id = {label: idx for idx, label in sanitized.items()}
-        config.num_labels = max(getattr(config, "num_labels", 0), len(sanitized))
+    id2label_raw = dict(getattr(config, "id2label", {}) or {})
+    sanitized = {}
+    for idx in range(target_num_labels):
+        label = id2label_raw.get(str(idx), id2label_raw.get(idx))
+        sanitized[idx] = label if label is not None else f"unknown_{idx}"
+
+    config.id2label = sanitized
+    config.label2id = {label: idx for idx, label in sanitized.items()}
+    config.num_labels = target_num_labels
 
     model = ViTForImageClassification.from_pretrained(
         model_name,
         config=config,
-        ignore_mismatched_sizes=True,
     )
     model = model.to(device)
     model.eval()
