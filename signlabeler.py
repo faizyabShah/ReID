@@ -210,14 +210,8 @@ def load_gtsrb_classifier(device):
 
     model_name = "bazyl/gtsrb-model"
     processor = ViTImageProcessor.from_pretrained(model_name)
-
-    # Load config and clean up id2label (remove None values for stricter validation)
-    from transformers import ViTConfig
-    config = ViTConfig.from_pretrained(model_name)
-    if hasattr(config, 'id2label') and config.id2label:
-        config.id2label = {k: v for k, v in config.id2label.items() if v is not None}
-
-    model = ViTForImageClassification.from_pretrained(model_name, config=config)
+    # Use trust_model_config=True to bypass strict validation of the model's id2label
+    model = ViTForImageClassification.from_pretrained(model_name, trust_model_config=True)
     model = model.to(device)
     model.eval()
     print(f"Loaded: {model_name}")
