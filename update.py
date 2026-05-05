@@ -312,6 +312,8 @@ if __name__ == "__main__":
                         help="Path to test_sign_types.csv")
     parser.add_argument("--proto_margin", default=0.05, type=float,
                         help="Prototype confidence margin for filtering")
+    parser.add_argument("--proto_use_unfused", action="store_true",
+                        help="Use non-fused CLS features for prototype routing")
     args = parser.parse_args()
 
     if args.config_file != "":
@@ -348,8 +350,8 @@ if __name__ == "__main__":
         qf, gf, q_camids, g_camids, q_paths, g_paths = extract_feature(model, val_loader, num_query)
 
     # save feature
-    qf=qf.cpu().numpy()
-    gf=gf.cpu().numpy()
+    qf = qf.cpu().numpy()
+    gf = gf.cpu().numpy()
     np.save("./qf.npy", qf)
     np.save("./gf.npy", gf)
 
@@ -416,9 +418,28 @@ if __name__ == "__main__":
             q_keys = [_safe_rel_image_key(p, query_dir) for p in q_paths]
             g_keys = [_safe_rel_image_key(p, gallery_dir) for p in g_paths]
 
+            qf_proto = qf
+            if args.proto_use_unfused and cfg.TEST.CLS_FUSION:
+                print("[proto] Using non-fused CLS features for prototype routing.")
+                proto_cfg = cfg.clone()
+                proto_cfg.defrost()
+                proto_cfg.TEST.CLS_FUSION = False
+                proto_cfg.TEST.CLS_FUSION_LAST = 1
+                proto_cfg.freeze()
+
+                proto_model = make_model(proto_cfg, proto_cfg.MODEL.NAME, 0, 0, 0)
+                proto_model.load_param(proto_cfg.TEST.WEIGHT)
+                proto_model.eval()
+                with torch.no_grad():
+                    qf_proto, _, _, _, _, _ = extract_feature(proto_model, val_loader, num_query)
+                qf_proto = qf_proto.cpu().numpy()
+                del proto_model
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+
             re_rank_dist = apply_prototype_filter(
                 re_rank_dist,
-                qf,
+                qf_proto,
                 q_keys,
                 g_keys,
                 query_sign_map,
