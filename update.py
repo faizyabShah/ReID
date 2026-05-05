@@ -15,13 +15,17 @@ from processor.part_attention_vit_processor import do_inference as do_inf_pat
 #from torch.backends import cudnn
 
 def read_classes_from_csv(csv_path):
-    """Reads the CSV and returns a list of classes in order."""
+    """Reads the CSV and returns a list of classes in order.
+    
+    Dynamically finds the 'Class' column to support different CSV formats.
+    """
     classes = []
     with open(csv_path, 'r') as f:
         reader = csv.reader(f)
-        next(reader)  # Skip the header (cameraID, imageName, Class)
+        header = next(reader)  # Read the header
+        class_index = header.index('Class')  # Find the Class column dynamically
         for row in reader:
-            classes.append(row[2])  # The Class is the 3rd column
+            classes.append(row[class_index])
     return classes
 
 def apply_class_penalty(dist_mat, query_classes, gallery_classes):
