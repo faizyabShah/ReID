@@ -25,6 +25,12 @@ class DummyConfig:
         NECK_FEAT = 'after'
         CLS_FUSION = False
 
+def detect_num_classes(state_dict):
+    """Auto-detect number of classes from checkpoint."""
+    if 'classifier.weight' in state_dict:
+        return state_dict['classifier.weight'].shape[0]
+    return 1000  # Fallback
+
 def test_checkpoint_loading(checkpoint_path, model_type='vit_large'):
     """Verify your PAT checkpoint can be loaded and has correct structure."""
     print("=" * 70)
@@ -51,6 +57,10 @@ def test_checkpoint_loading(checkpoint_path, model_type='vit_large'):
     n_params = sum(v.numel() for v in state.values())
     print(f"  Total parameters in checkpoint: {n_params:,}")
 
+    # Detect number of classes
+    num_classes = detect_num_classes(state)
+    print(f"  Detected number of classes: {num_classes}")
+
     # Check for classifier/bottleneck
     has_classifier = any("classifier" in k for k in state.keys())
     has_bottleneck = any("bottleneck" in k for k in state.keys())
@@ -58,7 +68,7 @@ def test_checkpoint_loading(checkpoint_path, model_type='vit_large'):
     print(f"  Has bottleneck layers: {has_bottleneck}")
 
     # Try loading into PAT model
-    print(f"\n[3/4] Testing PAT model loading...")
+    print(f"\n[3/4] Testing PAT model loading with {num_classes} classes...")
     try:
         cfg = DummyConfig()
         if model_type == 'vit_large':
@@ -72,8 +82,11 @@ def test_checkpoint_loading(checkpoint_path, model_type='vit_large'):
         else:
             raise ValueError(f"Unknown model type: {model_type}")
 
-        backbone = build_part_attention_vit(num_classes=1000, cfg=cfg,
+        # Create model with detected number of classes
+        backbone = build_part_attention_vit(num_classes=num_classes, cfg=cfg,
                                              factory=factory, pretrain_tag='imagenet')
+
+        # Load full state dict (classifier will now match)
         backbone.load_state_dict(state, strict=False)
         backbone.eval()
         print("✅ Successfully loaded into PAT backbone")
@@ -127,3 +140,4 @@ if __name__ == "__main__":
     model_type = sys.argv[2] if len(sys.argv) > 2 else 'vit_large'
     success = test_checkpoint_loading(checkpoint_path, model_type)
     sys.exit(0 if success else 1)
+

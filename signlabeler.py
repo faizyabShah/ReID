@@ -512,7 +512,11 @@ def build_prototypes(csv_path, image_dir, reid_checkpoint, reid_backbone,
         # Import your custom PAT model architecture
         from model.make_model import build_part_attention_vit
         from model.backbones.vit_pytorch import part_attention_vit_large
-        from config import cfg  # You may need to load your config
+
+        # Load checkpoint to detect num_classes
+        ckpt = torch.load(reid_checkpoint, map_location=device)
+        state = ckpt.get("model", ckpt.get("state_dict", ckpt))
+        num_classes = state.get('classifier.weight', torch.empty(1000, 1024)).shape[0]
 
         # Dummy config for model initialization
         class DummyConfig:
@@ -535,19 +539,19 @@ def build_prototypes(csv_path, image_dir, reid_checkpoint, reid_backbone,
         dummy_cfg = DummyConfig()
         factory = {'vit_large_patch16_224_TransReID': part_attention_vit_large}
 
-        backbone = build_part_attention_vit(num_classes=1000, cfg=dummy_cfg,
+        backbone = build_part_attention_vit(num_classes=num_classes, cfg=dummy_cfg,
                                              factory=factory, pretrain_tag='imagenet')
         feat_dim = 1024
-
-        # Load checkpoint into PAT model
-        ckpt = torch.load(reid_checkpoint, map_location=device)
-        state = ckpt.get("model", ckpt.get("state_dict", ckpt))
         backbone.load_state_dict(state, strict=False)
-        print(f"✅ Loaded PAT checkpoint: {reid_checkpoint}")
+        print(f"✅ Loaded PAT checkpoint ({num_classes} classes): {reid_checkpoint}")
 
     elif reid_backbone == "vit_base":
         from model.make_model import build_part_attention_vit
         from model.backbones.vit_pytorch import part_attention_vit_base
+
+        ckpt = torch.load(reid_checkpoint, map_location=device)
+        state = ckpt.get("model", ckpt.get("state_dict", ckpt))
+        num_classes = state.get('classifier.weight', torch.empty(1000, 768)).shape[0]
 
         class DummyConfig:
             class MODEL:
@@ -569,14 +573,11 @@ def build_prototypes(csv_path, image_dir, reid_checkpoint, reid_backbone,
         dummy_cfg = DummyConfig()
         factory = {'vit_base_patch16_224_TransReID': part_attention_vit_base}
 
-        backbone = build_part_attention_vit(num_classes=1000, cfg=dummy_cfg,
+        backbone = build_part_attention_vit(num_classes=num_classes, cfg=dummy_cfg,
                                              factory=factory, pretrain_tag='imagenet')
         feat_dim = 768
-
-        ckpt = torch.load(reid_checkpoint, map_location=device)
-        state = ckpt.get("model", ckpt.get("state_dict", ckpt))
         backbone.load_state_dict(state, strict=False)
-        print(f"✅ Loaded PAT checkpoint: {reid_checkpoint}")
+        print(f"✅ Loaded PAT checkpoint ({num_classes} classes): {reid_checkpoint}")
 
     elif reid_backbone == "resnet50":
         backbone = models.resnet50(weights=None)
