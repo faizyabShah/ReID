@@ -429,6 +429,7 @@ if __name__ == "__main__":
 
                 proto_model = make_model(proto_cfg, proto_cfg.MODEL.NAME, 0, 0, 0)
                 proto_model.load_param(proto_cfg.TEST.WEIGHT)
+                proto_model.to(cfg.MODEL.DEVICE)
                 proto_model.eval()
                 with torch.no_grad():
                     qf_proto, _, _, _, _, _ = extract_feature(proto_model, val_loader, num_query)
