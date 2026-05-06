@@ -4,13 +4,18 @@ import torch
 import argparse
 
 import numpy as np
+from torch.utils.data import DataLoader
 from config import cfg
 from model import make_model
 from utils.logger import setup_logger
 from utils.re_ranking import re_ranking
 from data.build_DG_dataloader import build_reid_test_loader
+from data.build_DG_dataloader import fast_batch_collator
+from data.common import CommDataset
+from data.transforms.build import build_transforms
 from processor.ori_vit_processor_with_amp import do_inference as do_inf
 from processor.part_attention_vit_processor import do_inference as do_inf_pat
+from utils.class_split import is_traffic_class, normalize_class_name as shared_normalize_class_name, read_class_map, resolve_image_path
 
 #from torch.backends import cudnn
 
@@ -85,11 +90,7 @@ def apply_caj(q_g_dist, q_q_dist, g_g_dist, q_camids, g_camids,
     return q_g_dist, q_q_dist, g_g_dist
 
 def normalize_class_name(class_name):
-    """Normalize class names so dataset-specific aliases share one config key."""
-    normalized = str(class_name).strip().lower().replace(" ", "").replace("_", "")
-    if normalized in {"trafficsign", "trafficsignal", "signal", "sign"}:
-        return "traffic"
-    return normalized
+    return shared_normalize_class_name(class_name)
 
 def _extract_rerank_params(param_node):
     return {
@@ -171,6 +172,95 @@ def extract_feature(model, dataloaders, num_query):
     g_camids = camids[num_query:]
     return qf, gf, q_camids, g_camids
 
+
+def build_loader(cfg, items):
+    transforms = build_transforms(cfg, is_train=False)
+    dataset = CommDataset(items, transforms, relabel=False)
+    return DataLoader(
+        dataset,
+        batch_size=cfg.TEST.IMS_PER_BATCH,
+        shuffle=False,
+        num_workers=cfg.DATALOADER.NUM_WORKERS,
+        collate_fn=fast_batch_collator,
+    )
+
+
+def read_split_records(split_csv_path, class_csv_path, image_root, image_subdir):
+    with open(split_csv_path, 'r', newline='') as handle:
+        reader = csv.DictReader(handle)
+        if reader.fieldnames is None:
+            raise ValueError(f"Empty CSV: {split_csv_path}")
+
+        image_col = next((c for c in ['imageName', 'imagename', 'image_name'] if c in reader.fieldnames), None)
+        pid_col = next((c for c in ['objectID', 'Corresponding Indexes', 'object', 'pid'] if c in reader.fieldnames), None)
+        cam_col = next((c for c in ['cameraID', 'camid', 'camera'] if c in reader.fieldnames), None)
+        if image_col is None or pid_col is None or cam_col is None:
+            raise ValueError(f"Could not find required columns in {split_csv_path}")
+
+        class_map = read_class_map(class_csv_path)
+        records = []
+        for row in reader:
+            image_name = str(row[image_col]).strip()
+            pid = int(row[pid_col])
+            camid = int(str(row[cam_col]).strip().lstrip('cC'))
+            class_name = class_map.get(image_name, class_map.get(os.path.basename(image_name)))
+            records.append({
+                'image_name': image_name,
+                'image_path': resolve_image_path(image_root, image_subdir, image_name),
+                'pid': pid,
+                'camid': camid,
+                'class_name': shared_normalize_class_name(class_name) if class_name is not None else None,
+            })
+    return records
+
+
+def build_combined_items(query_records, gallery_records, class_name):
+    class_name = shared_normalize_class_name(class_name)
+    if class_name in {'nontraffic', 'other'}:
+        selected_queries = [record for record in query_records if shared_normalize_class_name(record.get('class_name')) != 'traffic']
+    elif class_name in {'all', 'any', 'none'}:
+        selected_queries = list(query_records)
+    else:
+        selected_queries = [record for record in query_records if shared_normalize_class_name(record.get('class_name')) == class_name]
+    combined_items = []
+    combined_items.extend(
+        (
+            record['image_path'],
+            record['pid'],
+            record['camid'],
+            {'class_name': record.get('class_name'), 'q_or_g': 'query'},
+        )
+        for record in selected_queries
+    )
+    combined_items.extend(
+        (
+            record['image_path'],
+            record['pid'],
+            record['camid'],
+            {'class_name': record.get('class_name'), 'q_or_g': 'gallery'},
+        )
+        for record in gallery_records
+    )
+    return selected_queries, combined_items
+
+
+def run_split_model(model, cfg, query_records, gallery_records, class_name):
+    selected_queries, combined_items = build_combined_items(query_records, gallery_records, class_name)
+    if not selected_queries:
+        return {}
+
+    loader = build_loader(cfg, combined_items)
+    qf, gf, _, _ = extract_feature(model, loader, len(selected_queries))
+    qf = qf.cpu().numpy()
+    gf = gf.cpu().numpy()
+    q_g_dist = np.dot(qf, np.transpose(gf))
+    q_q_dist = np.dot(qf, np.transpose(qf))
+    g_g_dist = np.dot(gf, np.transpose(gf))
+    re_rank_dist = re_ranking(q_g_dist, q_q_dist, g_g_dist)
+    indices = np.argsort(re_rank_dist, axis=1)[:, :100]
+
+    return {record['image_name']: indices[row_idx] + 1 for row_idx, record in enumerate(selected_queries)}
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="ReID Training")
     parser.add_argument(
@@ -204,80 +294,114 @@ if __name__ == "__main__":
 
     os.environ['CUDA_VISIBLE_DEVICES'] = cfg.MODEL.DEVICE_ID
 
-    model = make_model(cfg, cfg.MODEL.NAME, 0,0,0)
-    model.load_param(cfg.TEST.WEIGHT)
+    traffic_weight = args.traffic_weight or cfg.TEST.TRAFFIC_WEIGHT
+    other_weight = args.other_weight or cfg.TEST.OTHER_WEIGHT
+    dual_mode = bool(traffic_weight and other_weight)
+    if dual_mode:
+        query_csv_path = os.path.join(cfg.DATASETS.ROOT_DIR, "query.csv")
+        gallery_csv_path = os.path.join(cfg.DATASETS.ROOT_DIR, "test.csv")
+        query_class_csv = os.path.join(cfg.DATASETS.ROOT_DIR, "query_classes.csv")
+        gallery_class_csv = os.path.join(cfg.DATASETS.ROOT_DIR, "test_classes.csv")
 
-    for testname in cfg.DATASETS.TEST:
-        val_loader, num_query = build_reid_test_loader(cfg, testname)
-        if cfg.MODEL.NAME == 'part_attention_vit':
-            do_inf_pat(cfg, model, val_loader, num_query)
-        else:
-            do_inf(cfg, model, val_loader, num_query)
-    with torch.no_grad():
-        qf, gf, q_camids, g_camids = extract_feature(model, val_loader, num_query)
+        query_records = read_split_records(query_csv_path, query_class_csv, cfg.DATASETS.ROOT_DIR, "image_query")
+        gallery_records = read_split_records(gallery_csv_path, gallery_class_csv, cfg.DATASETS.ROOT_DIR, "image_test")
 
-    # save feature
-    qf=qf.cpu().numpy()
-    gf=gf.cpu().numpy()
-    np.save("./qf.npy", qf)
-    np.save("./gf.npy", gf)
+        traffic_model = make_model(cfg, cfg.MODEL.NAME, 0, 0, 0)
+        traffic_model.load_param(traffic_weight)
+        other_model = make_model(cfg, cfg.MODEL.NAME, 0, 0, 0)
+        other_model.load_param(other_weight)
 
-    q_g_dist = np.dot(qf, np.transpose(gf))
-    q_q_dist = np.dot(qf, np.transpose(qf))
-    g_g_dist = np.dot(gf, np.transpose(gf))
+        traffic_predictions = run_split_model(traffic_model, cfg, query_records, gallery_records, cfg.MODEL.TRAFFIC_CLASS_NAME)
+        other_predictions = run_split_model(other_model, cfg, query_records, gallery_records, 'non_traffic')
 
-    query_csv_path = os.path.join(cfg.DATASETS.ROOT_DIR, "query_classes.csv")
-    gallery_csv_path = os.path.join(cfg.DATASETS.ROOT_DIR, "test_classes.csv")
-    need_classes = cfg.TEST.DO_CLASS_FILTER or cfg.TEST.DO_CLASS_BASED_RERANKING
-    query_classes = gallery_classes = None
-    if need_classes:
-        query_classes = read_classes_from_csv(query_csv_path)
-        gallery_classes = read_classes_from_csv(gallery_csv_path)
-
-    if cfg.TEST.DO_CLASS_BASED_RERANKING:
-        re_rank_dist = apply_class_based_reranking(
-            q_g_dist,
-            q_q_dist,
-            g_g_dist,
-            query_classes,
-            gallery_classes,
-            cfg.TEST.CLASS_BASED_RERANKING_PARAMS,
-        )
+        output_path = args.track.split(".txt")[0] + "_submission.csv"
+        with open(output_path, 'w', newline='') as archivo_csv:
+            csv_writter = csv.writer(archivo_csv)
+            csv_writter.writerow(['imageName', 'Corresponding Indexes'])
+            for record in query_records:
+                image_name = record['image_name']
+                if is_traffic_class(record.get('class_name')):
+                    track = traffic_predictions.get(image_name)
+                else:
+                    track = other_predictions.get(image_name)
+                if track is None:
+                    continue
+                csv_writter.writerow([image_name, ' '.join(map(str, track.tolist()))])
     else:
-        re_rank_dist = re_ranking(q_g_dist, q_q_dist, g_g_dist)
+        model = make_model(cfg, cfg.MODEL.NAME, 0,0,0)
+        model.load_param(cfg.TEST.WEIGHT)
 
-    # Apply Camera-Aware Jaccard adjustment if enabled
-    if cfg.TEST.DO_CAJ_ADJUSTMENT:
-        re_rank_dist, _, _ = apply_caj(
-            re_rank_dist,
-            q_q_dist,
-            g_g_dist,
-            q_camids,
-            g_camids,
-            same_cam_penalty=cfg.TEST.CAJ_SAME_CAM_PENALTY,
-            cross_cam_scale=cfg.TEST.CAJ_CROSS_CAM_SCALE,
-        )
+        for testname in cfg.DATASETS.TEST:
+            val_loader, num_query = build_reid_test_loader(cfg, testname)
+            if cfg.MODEL.NAME == 'part_attention_vit':
+                do_inf_pat(cfg, model, val_loader, num_query)
+            else:
+                do_inf(cfg, model, val_loader, num_query)
+        with torch.no_grad():
+            qf, gf, q_camids, g_camids = extract_feature(model, val_loader, num_query)
 
-    if cfg.TEST.DO_CLASS_FILTER:
-        re_rank_dist = apply_class_penalty(re_rank_dist, query_classes, gallery_classes)
+        # save feature
+        qf=qf.cpu().numpy()
+        gf=gf.cpu().numpy()
+        np.save("./qf.npy", qf)
+        np.save("./gf.npy", gf)
 
-    indices = np.argsort(re_rank_dist, axis=1)[:, :100]
+        q_g_dist = np.dot(qf, np.transpose(gf))
+        q_q_dist = np.dot(qf, np.transpose(qf))
+        g_g_dist = np.dot(gf, np.transpose(gf))
 
-    m, n = indices.shape
-    # # print('m: {}  n: {}'.format(m, n))
-    with open(args.track, 'wb') as f_w:
-        for i in range(m):
-            write_line = indices[i] + 1
-            write_line = ' '.join(map(str, write_line.tolist())) + '\n'
-            f_w.write(write_line.encode())
+        query_csv_path = os.path.join(cfg.DATASETS.ROOT_DIR, "query_classes.csv")
+        gallery_csv_path = os.path.join(cfg.DATASETS.ROOT_DIR, "test_classes.csv")
+        need_classes = cfg.TEST.DO_CLASS_FILTER or cfg.TEST.DO_CLASS_BASED_RERANKING
+        query_classes = gallery_classes = None
+        if need_classes:
+            query_classes = read_classes_from_csv(query_csv_path)
+            gallery_classes = read_classes_from_csv(gallery_csv_path)
+
+        if cfg.TEST.DO_CLASS_BASED_RERANKING:
+            re_rank_dist = apply_class_based_reranking(
+                q_g_dist,
+                q_q_dist,
+                g_g_dist,
+                query_classes,
+                gallery_classes,
+                cfg.TEST.CLASS_BASED_RERANKING_PARAMS,
+            )
+        else:
+            re_rank_dist = re_ranking(q_g_dist, q_q_dist, g_g_dist)
+
+        # Apply Camera-Aware Jaccard adjustment if enabled
+        if cfg.TEST.DO_CAJ_ADJUSTMENT:
+            re_rank_dist, _, _ = apply_caj(
+                re_rank_dist,
+                q_q_dist,
+                g_g_dist,
+                q_camids,
+                g_camids,
+                same_cam_penalty=cfg.TEST.CAJ_SAME_CAM_PENALTY,
+                cross_cam_scale=cfg.TEST.CAJ_CROSS_CAM_SCALE,
+            )
+
+        if cfg.TEST.DO_CLASS_FILTER:
+            re_rank_dist = apply_class_penalty(re_rank_dist, query_classes, gallery_classes)
+
+        indices = np.argsort(re_rank_dist, axis=1)[:, :100]
+
+        m, n = indices.shape
+        # # print('m: {}  n: {}'.format(m, n))
+        with open(args.track, 'wb') as f_w:
+            for i in range(m):
+                write_line = indices[i] + 1
+                write_line = ' '.join(map(str, write_line.tolist())) + '\n'
+                f_w.write(write_line.encode())
 
 
-    lista_nombres = ["{:06d}.jpg".format(i) for i in range(1, len(indices) + 1)]
-    output_path = args.track.split(".txt")[0] + "_submission.csv"
+        lista_nombres = ["{:06d}.jpg".format(i) for i in range(1, len(indices) + 1)]
+        output_path = args.track.split(".txt")[0] + "_submission.csv"
 
-    with open(output_path, 'w', newline='') as archivo_csv:
-        csv_writter = csv.writer(archivo_csv)
-        csv_writter.writerow(['imageName', 'Corresponding Indexes'])
-        for numero, track in zip(lista_nombres, indices):
-            track_str = ' '.join(map(str, track + 1))
-            csv_writter.writerow([numero, track_str])
+        with open(output_path, 'w', newline='') as archivo_csv:
+            csv_writter = csv.writer(archivo_csv)
+            csv_writter.writerow(['imageName', 'Corresponding Indexes'])
+            for numero, track in zip(lista_nombres, indices):
+                track_str = ' '.join(map(str, track + 1))
+                csv_writter.writerow([numero, track_str])

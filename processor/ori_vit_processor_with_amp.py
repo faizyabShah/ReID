@@ -18,7 +18,8 @@ def ori_vit_do_train_with_amp(cfg,
              optimizer,
              scheduler,
              loss_fn,
-             num_query, local_rank):
+             num_query, local_rank,
+             log_name=None):
     log_period = cfg.SOLVER.LOG_PERIOD
     checkpoint_period = cfg.SOLVER.CHECKPOINT_PERIOD
     eval_period = cfg.SOLVER.EVAL_PERIOD
@@ -28,8 +29,9 @@ def ori_vit_do_train_with_amp(cfg,
 
     logger = logging.getLogger("PAT.train")
     logger.info('start training')
-    log_path = os.path.join(cfg.LOG_ROOT, cfg.LOG_NAME)
-    tb_path = os.path.join(cfg.TB_LOG_ROOT, cfg.LOG_NAME)
+    log_name = log_name or cfg.LOG_NAME
+    log_path = os.path.join(cfg.LOG_ROOT, log_name)
+    tb_path = os.path.join(cfg.TB_LOG_ROOT, log_name)
     tbWriter = SummaryWriter(tb_path)
     print("saving tblog to {}".format(tb_path))
     
