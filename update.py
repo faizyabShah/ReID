@@ -142,15 +142,18 @@ def load_prototypes(bank_path):
     return types, proto_mat
 
 def apply_prototype_filter(dist_mat, qf, q_keys, g_keys, query_sign_map, gallery_sign_map,
-                           proto_types, proto_mat, proto_margin=0.05, penalty=1e6,
+                           proto_types, proto_mat, proto_margin=0.05, penalty=0.1,
                            query_classes=None):
+    """
+    Soft shape-label penalty. No prototype embeddings used.
+    Just compares shape labels from the classifier and adds a small
+    distance penalty for mismatched shapes.
+    """
     q_sign_types = []
     q_viewpoints = []
-    q_missing = 0
     for key in q_keys:
         item = query_sign_map.get(key) or query_sign_map.get(os.path.basename(key))
         if not item:
-            q_missing += 1
             q_sign_types.append(None)
             q_viewpoints.append(None)
         else:
@@ -159,56 +162,50 @@ def apply_prototype_filter(dist_mat, qf, q_keys, g_keys, query_sign_map, gallery
 
     g_sign_types = []
     g_viewpoints = []
-    g_missing = 0
     for key in g_keys:
         item = gallery_sign_map.get(key) or gallery_sign_map.get(os.path.basename(key))
         if not item:
-            g_missing += 1
             g_sign_types.append(None)
             g_viewpoints.append(None)
         else:
             g_sign_types.append(item[0])
             g_viewpoints.append(item[1])
 
-    q_sign_types = np.array(q_sign_types, dtype=object)
-    q_viewpoints = np.array(q_viewpoints, dtype=object)
     g_sign_types = np.array(g_sign_types, dtype=object)
     g_viewpoints = np.array(g_viewpoints, dtype=object)
 
-    if q_missing or g_missing:
-        print(f"[proto] Missing sign labels: query={q_missing}, gallery={g_missing}")
-
-    if proto_mat.shape[1] != qf.shape[1]:
-        print("[proto] Prototype dim mismatch; skipping filter.")
-        return dist_mat
-
     filtered = 0
-    fallback = 0
-    for i in range(qf.shape[0]):
+    skipped = 0
+
+    for i in range(dist_mat.shape[0]):
+        # Only apply to traffic sign queries
         if query_classes is not None:
             if normalize_class_name(query_classes[i]) != "traffic":
                 continue
+
         q_type = q_sign_types[i]
         q_view = q_viewpoints[i]
-        if q_view == "back" or q_type in {"sign_back", "unknown", None}:
+
+        # Skip back views and unknowns — flat retrieval for these
+        if q_view == "back" or q_type in {"sign_back", "unknown", "other", None}:
+            skipped += 1
             continue
 
-        sims = proto_mat @ qf[i]
-        if sims.size < 2:
-            continue
-        best_idx = int(np.argmax(sims))
-        second_idx = int(np.argsort(sims)[-2])
-        margin = sims[best_idx] - sims[second_idx]
-        if margin < proto_margin:
-            fallback += 1
-            continue
-
-        best_type = proto_types[best_idx]
-        allowed = (g_sign_types == best_type) | (g_viewpoints == "back") | (g_sign_types == "sign_back")
-        dist_mat[i, ~allowed] += penalty
+        # Vectorized: penalize gallery items with different shape
+        # but skip backs and wildcards on the gallery side
+        mismatch = (
+            (g_sign_types != q_type) &
+            (g_viewpoints != "back") &
+            (g_sign_types != "sign_back") &
+            (g_sign_types != "unknown") &
+            (g_sign_types != "other") &
+            (g_sign_types != None)
+        )
+        dist_mat[i, mismatch] += penalty
         filtered += 1
 
-    print(f"[proto] Applied filter to {filtered} queries (fallback: {fallback})")
+    print(f"[shape] Soft penalty applied to {filtered} queries "
+          f"(skipped {skipped} back/unknown), penalty={penalty}")
     return dist_mat
 
 def _extract_rerank_params(param_node):
@@ -448,7 +445,7 @@ if __name__ == "__main__":
                 proto_types,
                 proto_mat,
                 proto_margin=args.proto_margin,
-                penalty=1e6,
+                penalty=0.05,
                 query_classes=query_classes,
             )
         except Exception as e:

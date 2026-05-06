@@ -300,26 +300,31 @@ class HybridShapeClassifier:
         self.gtsrb_processor = None
     
     def _load_gtsrb(self):
-        """Lazy-load GTSRB model."""
+        """Lazy-load GTSRB model, patching the None label issue."""
         if self.gtsrb_model is not None:
             return
         
-        from transformers import AutoConfig, ViTForImageClassification, ViTImageProcessor
+        from transformers import ViTForImageClassification, ViTImageProcessor, ViTConfig
+        import json
+        from huggingface_hub import hf_hub_download
         
         model_name = "bazyl/gtsrb-model"
-        target_num_labels = 44
         self.gtsrb_processor = ViTImageProcessor.from_pretrained(model_name)
         
-        config = AutoConfig.from_pretrained(model_name)
-        id2label_raw = dict(getattr(config, "id2label", {}) or {})
-        sanitized = {}
-        for idx in range(target_num_labels):
-            label = id2label_raw.get(str(idx), id2label_raw.get(idx))
-            sanitized[idx] = label if label is not None else f"unknown_{idx}"
-        config.id2label = sanitized
-        config.label2id = {label: idx for idx, label in sanitized.items()}
-        config.num_labels = target_num_labels
+        # Load config JSON manually to fix the None value before
+        # it hits the strict validator
+        config_path = hf_hub_download(model_name, "config.json")
+        with open(config_path, "r") as f:
+            config_dict = json.load(f)
         
+        # Patch: replace None values in id2label
+        if "id2label" in config_dict and config_dict["id2label"]:
+            config_dict["id2label"] = {
+                k: v if v is not None else f"unknown_{k}"
+                for k, v in config_dict["id2label"].items()
+            }
+        
+        config = ViTConfig(**config_dict)
         self.gtsrb_model = ViTForImageClassification.from_pretrained(
             model_name, config=config
         ).to(self.device).eval()
@@ -525,7 +530,30 @@ def label_test_with_shapes(csv_path, image_dir, output_path, device='cuda'):
     print("\nType distribution:")
     for t, c in pd.Series(sign_types).value_counts().items():
         print(f"  {t:25s}: {c}")
+# Add this function to shape_sign_grouping.py
 
+def extract_layer_cls_token(model, images, layer_idx):
+    """
+    Extract CLS token from a specific transformer block.
+    layer_idx: 0-23 for ViT-Large
+    """
+    backbone = model.base if hasattr(model, 'base') else model
+    
+    hooks = []
+    cls_tokens = []
+    
+    def hook_fn(module, input, output):
+        # CLS token is position 0 in the sequence
+        cls_tokens.append(output[:, 0, :].detach())
+    
+    # Register hook on the target block
+    handle = backbone.blocks[layer_idx].register_forward_hook(hook_fn)
+    
+    with torch.no_grad():
+        _ = model(images)
+    
+    handle.remove()
+    return cls_tokens[0]  # [batch, 1024]
 
 # ═══════════════════════════════════════════════════════════════════════
 # PROTOTYPE BUILDING WITH UNFUSED FEATURES
@@ -629,8 +657,9 @@ def build_shape_prototypes_unfused(
                 ff = None
                 for flip in [False, True]:
                     inp = torch.flip(batch, dims=[-1]) if flip else batch
-                    out = model(inp)
-                    f = out.float()
+                    # Try layers 4, 8, 12 — where shape info likely lives
+                    feats = extract_layer_cls_token(model, inp, layer_idx=16)
+                    f = feats.float()
                     if ff is None:
                         ff = torch.zeros_like(f)
                     ff = ff + f
