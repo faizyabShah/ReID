@@ -134,28 +134,35 @@ def extract_feature(model, dataloaders, num_query):
     features = []
     camids = []
     count = 0
-    img_path = []
 
     for data in dataloaders:
         img = data['images']
         camid = data['camid']
-        #obtain values form dict data
         n, c, h, w = img.size()
         count += n
-        # ff = torch.FloatTensor(n, 1024).zero_().cuda()  # 2048 is pool5 of resnet
-        for i in range(2):
-            input_img = img.cuda()
-            if i == 1:
-                input_img = torch.flip(input_img, dims=[-1])
-            outputs = model(input_img)
-            f = outputs.float()
-            if i == 0:
-                ff = torch.zeros(n, f.shape[1], device=f.device)
-            ff = ff + f
+        ff = None
+        for scale in [1.0, 1.1]:
+            for flip in [False, True]:
+                input_img = img.cuda()
+                if scale != 1.0:
+                    input_img = torch.nn.functional.interpolate(
+                        input_img, scale_factor=scale, mode='bilinear', align_corners=False
+                    )
+                    input_img = torch.nn.functional.interpolate(
+                        input_img, size=(h, w), mode='bilinear', align_corners=False
+                    )
+                if flip:
+                    input_img = torch.flip(input_img, dims=[-1])
+                outputs = model(input_img)
+                f = outputs.float()
+                if ff is None:
+                    ff = torch.zeros(n, f.shape[1], device=f.device)
+                ff = ff + f
         fnorm = torch.norm(ff, p=2, dim=1, keepdim=True)
         ff = ff.div(fnorm.expand_as(ff))
         features.append(ff)
         camids.extend(np.asarray(camid))
+
     features = torch.cat(features, 0)
     camids = np.array(camids)
 
@@ -218,6 +225,20 @@ if __name__ == "__main__":
     np.save("./qf.npy", qf)
     np.save("./gf.npy", gf)
 
+    # Camera feature normalization
+    print("[cam_norm] Normalizing features per camera...")
+    for cam_id in np.unique(q_camids):
+        mask = q_camids == cam_id
+        centroid = qf[mask].mean(axis=0)
+        qf[mask] = qf[mask] - centroid
+    for cam_id in np.unique(g_camids):
+        mask = g_camids == cam_id
+        centroid = gf[mask].mean(axis=0)
+        gf[mask] = gf[mask] - centroid
+
+    # Re-normalize after subtraction
+    qf = qf / (np.linalg.norm(qf, axis=1, keepdims=True) + 1e-12)
+    gf = gf / (np.linalg.norm(gf, axis=1, keepdims=True) + 1e-12)
     q_g_dist = np.dot(qf, np.transpose(gf))
     q_q_dist = np.dot(qf, np.transpose(qf))
     g_g_dist = np.dot(gf, np.transpose(gf))

@@ -56,7 +56,7 @@ TEST:
   NECK_FEAT: 'before'
   FEAT_NORM: True
   CLS_FUSION: True
-  CLS_FUSION_LAST: 6
+  CLS_FUSION_LAST: 2
   DO_CLASS_FILTER: True
   DO_CAJ_ADJUSTMENT: True
   DO_CLASS_BASED_RERANKING: True
@@ -66,19 +66,19 @@ TEST:
       K2: 4
       LAMBDA: 0.35
     container:
-      K1: 24
-      K2: 4
-      LAMBDA: 0.35
+      K1: 20
+      K2: 2
+      LAMBDA: 0.5
     crosswalk:
-      K1: 24
+      K1: 28
       K2: 4
       LAMBDA: 0.35
     rubbishbins:
-      K1: 24
+      K1: 20
       K2: 4
       LAMBDA: 0.3
     traffic:
-      K1: 20
+      K1: 14
       K2: 4
       LAMBDA: 0.35
 
