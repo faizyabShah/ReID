@@ -96,10 +96,10 @@ if __name__ == '__main__':
     parser.add_argument("--local_rank", default=0, type=int)
     parser.add_argument(
         "--class_split_mode",
-        default="all",
+        default=None,
         type=str,
         choices=["all", "traffic", "non_traffic", "dual"],
-        help="Train a single split or both traffic/non-traffic models.",
+        help="Optional override for class split mode; defaults to MODEL.CLASS_SPLIT_MODE in config.",
     )
     args = parser.parse_args()
 
@@ -133,7 +133,7 @@ if __name__ == '__main__':
 
     os.environ['CUDA_VISIBLE_DEVICES'] = cfg.MODEL.DEVICE_ID
 
-    requested_mode = args.class_split_mode or cfg.MODEL.CLASS_SPLIT_MODE
+    requested_mode = args.class_split_mode if args.class_split_mode is not None else cfg.MODEL.CLASS_SPLIT_MODE
     if requested_mode == 'dual':
         for split_mode in ('traffic', 'non_traffic'):
             run_single_training(cfg, split_mode, args.local_rank)

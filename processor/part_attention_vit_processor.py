@@ -74,6 +74,7 @@ def part_attention_vit_do_train_with_amp(cfg,
     
     best_mAP = 0.0
     best_index = 1
+    mAP = 0.0
     for epoch in range(1, epochs + 1):
         start_time = time.time()
         total_loss_meter.reset()

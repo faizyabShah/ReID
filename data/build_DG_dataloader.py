@@ -78,7 +78,7 @@ def build_reid_train_loader(cfg, class_mode=None):
                 add_info['domains'] = int(domain_idx)
 
             # attempt to attach class id (if available in train_classes.csv)
-            img_path = dataset.train[i][1]
+            img_path = dataset.train[i][0]
             cls_name = train_classes_map.get(img_path, train_classes_map.get(os.path.basename(img_path)))
             if cls_name is not None:
                 add_info['class_name'] = cls_name
