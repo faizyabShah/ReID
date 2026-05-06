@@ -339,65 +339,54 @@ class ClassBalancedIdentitySampler(Sampler):
                     batch_idxs_dict[pid].append(chunk)
                     chunk = []
 
-        # Keep only pids that still have available chunks.
-        available_by_class = {
-            cls: [pid for pid in pids if len(batch_idxs_dict[pid]) > 0]
-            for cls, pids in self.class_to_pids.items()
-        }
-
-        # Identity-level balancing: distribute num_pids_per_batch across classes.
-        num_classes = max(1, len(self.classes))
-        base = self.num_pids_per_batch // num_classes
-        rem = self.num_pids_per_batch % num_classes
-        pids_per_class = {
-            cls: base + (1 if i < rem else 0)
-            for i, cls in enumerate(self.classes)
-        }
-
         final_idxs = []
         while True:
+            available_by_class = {
+                cls: [pid for pid in pids if len(batch_idxs_dict[pid]) > 0]
+                for cls, pids in self.class_to_pids.items()
+            }
+
+            all_available = []
+            for cls in self.classes:
+                all_available.extend(available_by_class.get(cls, []))
+            if len(all_available) < self.num_pids_per_batch:
+                break
+
+            # Identity-level balancing: distribute pids across classes, but only
+            # choose each pid once per batch.
+            num_classes = max(1, len(self.classes))
+            base = self.num_pids_per_batch // num_classes
+            rem = self.num_pids_per_batch % num_classes
+            pids_per_class = {
+                cls: base + (1 if i < rem else 0)
+                for i, cls in enumerate(self.classes)
+            }
+
             batch_pids = []
+            used_pids = set()
 
             for cls in self.classes:
                 need = pids_per_class[cls]
                 if need <= 0:
                     continue
-                avail = available_by_class.get(cls, [])
-                if len(avail) == 0:
+                avail = [pid for pid in available_by_class.get(cls, []) if pid not in used_pids]
+                if not avail:
                     continue
-
-                if len(avail) >= need:
-                    chosen = random.sample(avail, need)
-                else:
-                    chosen = random.choices(avail, k=need)
-
+                chosen = random.sample(avail, min(need, len(avail)))
                 batch_pids.extend(chosen)
+                used_pids.update(chosen)
 
-            # Fill shortages from all remaining classes to keep batch size stable.
             if len(batch_pids) < self.num_pids_per_batch:
-                all_avail = []
-                for cls in self.classes:
-                    all_avail.extend(available_by_class.get(cls, []))
-                if len(all_avail) == 0:
+                remaining = [pid for pid in all_available if pid not in used_pids]
+                if len(remaining) < self.num_pids_per_batch - len(batch_pids):
                     break
-                short = self.num_pids_per_batch - len(batch_pids)
-                if len(all_avail) >= short:
-                    batch_pids.extend(random.sample(all_avail, short))
-                else:
-                    batch_pids.extend(random.choices(all_avail, k=short))
-
-            if len(batch_pids) == 0:
-                break
+                batch_pids.extend(random.sample(remaining, self.num_pids_per_batch - len(batch_pids)))
 
             batch_indices = []
             for pid in batch_pids[:self.num_pids_per_batch]:
                 if len(batch_idxs_dict[pid]) == 0:
                     continue
                 batch_indices.extend(batch_idxs_dict[pid].pop(0))
-                if len(batch_idxs_dict[pid]) == 0:
-                    cls = self.pid_class[pid]
-                    if pid in available_by_class.get(cls, []):
-                        available_by_class[cls].remove(pid)
 
             if len(batch_indices) < self.batch_size:
                 break
