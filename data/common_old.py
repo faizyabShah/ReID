@@ -29,21 +29,10 @@ class CommDataset(Dataset):
             img_path, pid, camid, others = self.img_items[index]
         else:
             img_path, pid, camid = self.img_items[index]
-            others = {}
-        
-        # Ensure others is a dict (backward compat with old code that used '' as default)
-        if not isinstance(others, dict):
-            others = {'domains': 0}
-        
-        # Ensure class_id exists (default = -1 means unknown, use horizontal parts)
-        if 'class_id' not in others:
-            others['class_id'] = -1
-
+            others = ''
         img = read_image(img_path)
-        if self.transform is not None:
-            img = self.transform(img)
-        if self.relabel:
-            pid = self.pid_dict[pid]
+        if self.transform is not None: img = self.transform(img)
+        if self.relabel: pid = self.pid_dict[pid]
         return {
             "images": img,
             "targets": pid,

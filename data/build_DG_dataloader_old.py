@@ -42,35 +42,18 @@ def build_reid_train_loader(cfg):
             dataset = DATASET_REGISTRY.get(d)(root=_root, combineall=cfg.DATASETS.COMBINEALL)
         if comm.is_main_process():
             dataset.show_train()
-        
-        for i, x in enumerate(dataset.train):
-            dataset.train[i] = list(dataset.train[i])
-            
-            if len(dataset.train[i]) >= 4 and isinstance(dataset.train[i][3], dict):
-                # Dataset already provides add_info dict (e.g., from UrbanElementsReID with class labels)
-                add_info = dataset.train[i][3]
-            else:
-                add_info = {}
+        if len(dataset.train[0]) < 4:
+            for i, x in enumerate(dataset.train):
+                add_info = {}  # dictionary
 
-            # Always add domain info
-            if cfg.DATALOADER.CAMERA_TO_DOMAIN:
-                add_info['domains'] = dataset.train[i][2]
-                camera_all.append(dataset.train[i][2])
-            else:
-                add_info['domains'] = int(domain_idx)
-            
-            # Ensure class_id exists (default -1 = unknown, will use horizontal parts)
-            if 'class_id' not in add_info:
-                add_info['class_id'] = -1
-            
-            # Replace or append add_info as 4th element
-            if len(dataset.train[i]) >= 4:
-                dataset.train[i][3] = add_info
-            else:
+                if cfg.DATALOADER.CAMERA_TO_DOMAIN:
+                    add_info['domains'] = dataset.train[i][2]
+                    camera_all.append(dataset.train[i][2])
+                else:
+                    add_info['domains'] = int(domain_idx)
+                dataset.train[i] = list(dataset.train[i])
                 dataset.train[i].append(add_info)
-            
-            dataset.train[i] = tuple(dataset.train[i][:4])  # ensure exactly 4 elements
-
+                dataset.train[i] = tuple(dataset.train[i])
         domain_idx += 1
         train_items.extend(dataset.train)
 

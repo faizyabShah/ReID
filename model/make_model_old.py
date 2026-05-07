@@ -287,19 +287,14 @@ class build_part_attention_vit(nn.Module):
         self.classifier = nn.Linear(self.in_planes, self.num_classes, bias=False)
         self.classifier.apply(weights_init_classifier)
 
-    def forward(self, x, class_ids=None):
-        """
-        Args:
-            x: input images [B, C, H, W]
-            class_ids: tensor [B] of class IDs, or None
-        """
-        layerwise_tokens = self.base(x, class_ids=class_ids)  # pass class_ids to backbone
-        layerwise_cls_tokens = [t[:, 0] for t in layerwise_tokens]  # cls token
-        part_feat_list = layerwise_tokens[-1][:, 1: 4]  # 3, 768
-    
-        layerwise_part_tokens = [[t[:, i] for i in range(1, 4)] for t in layerwise_tokens]  # 12 3 768
+    def forward(self, x):
+        layerwise_tokens = self.base(x) # B, N, C
+        layerwise_cls_tokens = [t[:, 0] for t in layerwise_tokens] # cls token
+        part_feat_list = layerwise_tokens[-1][:, 1: 4] # 3, 768
+
+        layerwise_part_tokens = [[t[:, i] for i in range(1,4)] for t in layerwise_tokens] # 12 3 768
         feat = self.bottleneck(layerwise_cls_tokens[-1])
-    
+
         if self.training:
             cls_score = self.classifier(feat)
             return cls_score, layerwise_cls_tokens, layerwise_part_tokens

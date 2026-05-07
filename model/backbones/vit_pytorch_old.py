@@ -635,28 +635,6 @@ class part_Attention_ViT(nn.Module):
         mask_[0, 1 : 4] = True
         return mask_
 
-    def attn_mask_generate_vertical(self, N=132, H=16, W=8, device='cuda'):
-        """Generate attention mask with VERTICAL bands (left/center/right).
-        Used for crosswalks where stripes run horizontally and we want to
-        cut across them with vertical slices.
-        
-        Part 1 -> left half   (cols 0 to W/2)
-        Part 2 -> center half (cols W/4 to 3W/4) 
-        Part 3 -> right half  (cols W/2 to W)
-        """
-        mask = torch.ones(N, 1, device=device)
-        mask[1 : 4, 0] = 0
-        mask_ = (mask @ mask.t()).bool()
-        # Vertical bands: swap H/W roles in generate_2d_mask
-        # generate_2d_mask(H, W, left, top, width, height, part, cls_label, device)
-        # For vertical bands: full height, partial width
-        mask_ |= generate_2d_mask(H, W, 0,     0, W/2, H, 1, False, device).bool()  # left half
-        mask_ |= generate_2d_mask(H, W, W/4,   0, W/2, H, 2, False, device).bool()  # center half
-        mask_ |= generate_2d_mask(H, W, W/2,   0, W/2, H, 3, False, device).bool()  # right half
-        mask_[1 : 4, 0] = True
-        mask_[0, 1 : 4] = True
-        return mask_
-
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
             trunc_normal_(m.weight, std=.02)
@@ -677,67 +655,34 @@ class part_Attention_ViT(nn.Module):
         self.num_classes = num_classes
         self.fc = nn.Linear(self.embed_dim, num_classes) if num_classes > 0 else nn.Identity()
 
-    def forward_features(self, x, class_ids=None):
-        """
-        Args:
-            x: input images [B, C, H, W]
-            class_ids: tensor of class IDs [B] or None
-                    0=Crosswalk (vertical parts), 1=Container, 2=RubbishBins, 3=TrafficSign (all horizontal)
-                    -1 or None = default horizontal parts
-        """
+    def forward_features(self, x):
         B = x.shape[0]
         x = self.patch_embed(x)
-    
-        cls_tokens = self.cls_token.expand(B, -1, -1)
+
+        cls_tokens = self.cls_token.expand(B, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
         part_token1 = self.part_token1.expand(B, -1, -1)
         part_token2 = self.part_token2.expand(B, -1, -1)
         part_token3 = self.part_token3.expand(B, -1, -1)
         x = torch.cat((cls_tokens, part_token1, part_token2, part_token3, x), dim=1)
-    
+
         x = x + self.pos_embed
+
         x = self.pos_drop(x)
         layerwise_tokens = []
-    
-        # Generate per-sample masks based on class_ids
-        H = self.patch_embed.num_y
-        W = self.patch_embed.num_x
-        
-        if class_ids is not None and class_ids.numel() > 0:
-            # Check if any sample needs vertical parts (class_id == 0 = Crosswalk)
-            needs_vertical = (class_ids == 0)
-            
-            if needs_vertical.any() and not needs_vertical.all():
-                # Mixed batch: need per-sample masks
-                mask_h = self.attn_mask_generate(self.num_patches, H, W, x.device.type)
-                mask_v = self.attn_mask_generate_vertical(self.num_patches, H, W, x.device.type)
-                
-                mask = torch.ones([B, 1, self.num_patches, self.num_patches], device=x.device.type)
-                for i in range(B):
-                    if needs_vertical[i]:
-                        mask[i, 0] = mask_v
-                    else:
-                        mask[i, 0] = mask_h
-            elif needs_vertical.all():
-                # All vertical
-                mask = torch.ones([B, 1, self.num_patches, self.num_patches], device=x.device.type)
-                mask[:, 0] = self.attn_mask_generate_vertical(self.num_patches, H, W, x.device.type)
-            else:
-                # All horizontal (default)
-                mask = torch.ones([B, 1, self.num_patches, self.num_patches], device=x.device.type)
-                mask[:, 0] = self.attn_mask_generate(self.num_patches, H, W, x.device.type)
-        else:
-            # No class info: default horizontal parts
-            mask = torch.ones([B, 1, self.num_patches, self.num_patches], device=x.device.type)
-            mask[:, 0] = self.attn_mask_generate(self.num_patches, H, W, x.device.type)
-    
+
+        mask = torch.ones([B, 1, self.num_patches, self.num_patches], device=x.device.type)
+        # if self.training:
+            # mask[:, 0] = self.mask
+        # for i in range(B):
+        mask[:, 0] = self.attn_mask_generate(self.num_patches, self.patch_embed.num_y, self.patch_embed.num_x, x.device.type)
         for blk in self.blocks:
             x = blk(x, mask)
             layerwise_tokens.append(x)
         layerwise_tokens = [self.norm(t) for t in layerwise_tokens]
         return layerwise_tokens
 
-    def forward(self, x, class_ids=None):
-        x = self.forward_features(x, class_ids=class_ids)
+    def forward(self, x):
+        x = self.forward_features(x)
         return x
 
     def load_param(self, model_path):

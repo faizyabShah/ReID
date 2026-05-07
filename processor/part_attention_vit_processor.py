@@ -56,17 +56,15 @@ def part_attention_vit_do_train_with_amp(cfg,
         print('initialize the centers')
         model.train()
         for i, informations in enumerate(train_loader):
-            # measure data loading time
             with torch.no_grad():
-                #input = input.cuda(non_blocking=True)
                 input = informations['images'].cuda(non_blocking=True)
                 vid = informations['targets']
                 camid = informations['camid']
                 path = informations['img_path']
-                #input = input.view(-1, input.size(2), input.size(3), input.size(4))
-
-                # compute output
-                _, _, layerwise_feat_list = model(input)
+                class_ids = informations['others'].get('class_id', None)
+                if class_ids is not None:
+                    class_ids = class_ids.cuda(non_blocking=True)
+                _, _, layerwise_feat_list = model(input, class_ids=class_ids)
                 patch_centers.get_soft_label(path, layerwise_feat_list[-1], vid=vid, camid=camid)
         print('initialization done')
     
@@ -88,16 +86,21 @@ def part_attention_vit_do_train_with_amp(cfg,
             camid = informations['camid']
             img_path = informations['img_path']
             t_domains = informations['others']['domains']
-
+            
+            # Extract class_ids for class-conditional part attention
+            class_ids = informations['others'].get('class_id', None)
+ 
             optimizer.zero_grad()
             img = img.to(device)
             target = vid.to(device)
             target_cam = camid.to(device)
             t_domains = t_domains.to(device)
-
+            if class_ids is not None:
+                class_ids = class_ids.to(device)
+ 
             model.to(device)
             with amp.autocast(enabled=True):
-                score, layerwise_global_feat, layerwise_feat_list = model(img)
+                score, layerwise_global_feat, layerwise_feat_list = model(img, class_ids=class_ids)
                 
                 ############## patch learning ######################
                 patch_agent, position = patch_centers.get_soft_label(img_path, layerwise_feat_list[-1], vid=vid, camid=camid)
