@@ -189,9 +189,15 @@ TEST:
   NECK_FEAT: before
   RE_RANKING: False
   WEIGHT: 
+[UrbanElementsReID] Loading with class labels from /home/sidna/ReID_Project/ReID_vitlarge64/Urban2026_UAM_MERGED/train_classes.csv
+[UrbanElementsReID] Loading with class labels from /home/sidna/ReID_Project/ReID_vitlarge64/Urban2026_UAM_MERGED/train_classes.csv
+[UrbanElementsReID] Loading with class labels from /home/sidna/ReID_Project/ReID_vitlarge64/Urban2026_UAM_MERGED/train_classes.csv
 2026-05-07 14:05:50,698 PAT INFO: => Loaded UrbanElementsReID
 2026-05-07 14:05:50,698 PAT INFO:   ----------------------------------------
 2026-05-07 14:05:50,698 PAT INFO:   subset   | # ids | # images | # cameras
 2026-05-07 14:05:50,698 PAT INFO:   ----------------------------------------
 2026-05-07 14:05:50,698 PAT INFO:   train    |  1567 |    17562 |         4
 2026-05-07 14:05:50,698 PAT INFO:   ----------------------------------------
+[UrbanElementsReID] Loading with class labels from /home/sidna/ReID_Project/ReID_vitlarge64/Urban2026_UAM_MERGED/train_classes.csv
+[UrbanElementsReID] Loading with class labels from /home/sidna/ReID_Project/ReID_vitlarge64/Urban2026_UAM_MERGED/train_classes.csv
+[UrbanElementsReID] Loading with class labels from /home/sidna/ReID_Project/ReID_vitlarge64/Urban2026_UAM_MERGED/train_classes.csv

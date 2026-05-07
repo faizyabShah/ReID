@@ -23,10 +23,6 @@ CLASS_NAME_TO_ID = {
     'TrafficSign': 3,
 }
 
-# Which classes use vertical part attention (cuts across horizontal stripes)
-# All others use horizontal part attention (default)
-VERTICAL_PART_CLASSES = {0}  # Only Crosswalk
-
 @DATASET_REGISTRY.register()
 class UrbanElementsReID(ImageDataset):
 
@@ -39,9 +35,9 @@ class UrbanElementsReID(ImageDataset):
         self.gallery_dir = osp.join(self.dataset_dir, 'image_train/')
 
         self._check_before_run()
-        train = self._process_dir(self.train_dir, relabel=True)
-        query = self._process_dir(self.query_dir, relabel=False)
-        gallery = self._process_dir(self.gallery_dir, relabel=False)
+        train = self._process_dir(self.train_dir, relabel=True, include_class=True)
+        query = self._process_dir(self.query_dir, relabel=False, include_class=False)
+        gallery = self._process_dir(self.gallery_dir, relabel=False, include_class=False)
 
         self.train = train
         self.query = query
@@ -104,19 +100,28 @@ class UrbanElementsReID(ImageDataset):
                 pids.append(-1)
         return list(zip(camids, imageNames, pids))
 
-    def _process_dir(self, dir_path, relabel=False):
-        # Try train_classes.csv first (has class labels), fall back to train.csv
-        classes_csv = osp.join(self.dataset_dir, 'train_classes.csv')
-        plain_csv = osp.join(self.dataset_dir, 'train.csv')
+    def _process_dir(self, dir_path, relabel=False, include_class=False):
+        """Process directory.
         
-        has_classes = osp.exists(classes_csv)
-        
-        if has_classes:
-            print(f"[UrbanElementsReID] Loading with class labels from {classes_csv}")
-            xml_file = self._readCSV_with_class_(classes_csv)
+        Args:
+            dir_path: path to images
+            relabel: whether to relabel pids
+            include_class: if True, read train_classes.csv and return 4-tuples 
+                          with add_info dict. If False, return standard 3-tuples.
+        """
+        if include_class:
+            classes_csv = osp.join(self.dataset_dir, 'train_classes.csv')
+            if osp.exists(classes_csv):
+                print(f"[UrbanElementsReID] Loading with class labels from {classes_csv}")
+                xml_file = self._readCSV_with_class_(classes_csv)
+                has_classes = True
+            else:
+                print(f"[UrbanElementsReID] No train_classes.csv found, falling back to train.csv")
+                xml_file = self._readCSV_(osp.join(self.dataset_dir, 'train.csv'))
+                has_classes = False
         else:
-            print(f"[UrbanElementsReID] No train_classes.csv found, loading from {plain_csv} (no class labels)")
-            xml_file = self._readCSV_(plain_csv)
+            xml_file = self._readCSV_(osp.join(self.dataset_dir, 'train.csv'))
+            has_classes = False
 
         pid_container = set()
         for item in xml_file:
@@ -132,21 +137,24 @@ class UrbanElementsReID(ImageDataset):
                 camid_str, imageName, pid, class_name = item
             else:
                 camid_str, imageName, pid = item
-                class_name = 'Unknown'
-            
+                class_name = None
+
             camid = int(camid_str[1:])
             if pid == -1:
                 continue
             if relabel:
                 pid = pid2label[pid]
-            
-            # Convert class name to integer ID
-            class_id = CLASS_NAME_TO_ID.get(class_name, -1)
-            
-            # Store as 4-tuple: (path, pid, camid, add_info)
-            # add_info will be merged with domains in build_DG_dataloader
-            add_info = {'class_id': class_id, 'class_name': class_name}
-            dataset.append((osp.join(dir_path, imageName), pid, camid, add_info))
+
+            img_path = osp.join(dir_path, imageName)
+
+            if include_class and has_classes:
+                # Training: return 4-tuple with class info
+                class_id = CLASS_NAME_TO_ID.get(class_name, -1)
+                add_info = {'class_id': class_id}
+                dataset.append((img_path, pid, camid, add_info))
+            else:
+                # Query/Gallery: return standard 3-tuple
+                dataset.append((img_path, pid, camid))
 
         return dataset
 
