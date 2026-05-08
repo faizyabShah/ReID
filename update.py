@@ -315,8 +315,13 @@ if __name__ == "__main__":
 
         traffic_model = make_model(cfg, cfg.MODEL.NAME, 0, 0, 0)
         traffic_model.load_param(traffic_weight)
+        traffic_model.eval()
+        traffic_model.cuda()
+        
         other_model = make_model(cfg, cfg.MODEL.NAME, 0, 0, 0)
         other_model.load_param(other_weight)
+        other_model.eval()
+        other_model.cuda()
 
         traffic_predictions = run_split_model(traffic_model, cfg, query_records, gallery_records, cfg.MODEL.TRAFFIC_CLASS_NAME)
         other_predictions = run_split_model(other_model, cfg, query_records, gallery_records, 'non_traffic')
@@ -337,6 +342,8 @@ if __name__ == "__main__":
     else:
         model = make_model(cfg, cfg.MODEL.NAME, 0,0,0)
         model.load_param(cfg.TEST.WEIGHT)
+        model.eval()
+        model.cuda()
 
         for testname in cfg.DATASETS.TEST:
             val_loader, num_query = build_reid_test_loader(cfg, testname)
