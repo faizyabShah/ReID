@@ -194,14 +194,15 @@ def read_split_records(split_csv_path, class_csv_path, image_root, image_subdir)
         image_col = next((c for c in ['imageName', 'imagename', 'image_name'] if c in reader.fieldnames), None)
         pid_col = next((c for c in ['objectID', 'Corresponding Indexes', 'object', 'pid'] if c in reader.fieldnames), None)
         cam_col = next((c for c in ['cameraID', 'camid', 'camera'] if c in reader.fieldnames), None)
-        if image_col is None or pid_col is None or cam_col is None:
+        if image_col is None or cam_col is None:
             raise ValueError(f"Could not find required columns in {split_csv_path}")
 
         class_map = read_class_map(class_csv_path)
         records = []
-        for row in reader:
+        for idx, row in enumerate(reader):
             image_name = str(row[image_col]).strip()
-            pid = int(row[pid_col])
+            # PID is optional (for unlabeled test sets); use index if not present
+            pid = int(row[pid_col]) if pid_col else idx
             camid = int(str(row[cam_col]).strip().lstrip('cC'))
             class_name = class_map.get(image_name, class_map.get(os.path.basename(image_name)))
             records.append({
