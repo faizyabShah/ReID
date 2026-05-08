@@ -271,6 +271,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--track", default="./config/PAT.yml", help="path to config file", type=str
     )
+    parser.add_argument(
+        "--traffic_weight", default="", help="path to traffic model weights", type=str
+    )
+    parser.add_argument(
+        "--other_weight", default="", help="path to non-traffic model weights", type=str
+    )
     args = parser.parse_args()
 
     if args.config_file != "":
