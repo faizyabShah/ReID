@@ -411,6 +411,7 @@ class ClassAwareTransformWrapper:
         for transform in base_transforms:
             if isinstance(transform, T.ToTensor):
                 self.found_tensor = True
+                self.post_tensor_transforms.append(transform)
             elif not self.found_tensor:
                 self.pre_tensor_transforms.append(transform)
             else:
