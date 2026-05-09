@@ -46,6 +46,7 @@ def part_attention_vit_do_train_with_amp(cfg,
     total_loss_meter = AverageMeter()
     reid_loss_meter = AverageMeter()
     pc_loss_meter = AverageMeter()
+    domain_loss_meter = AverageMeter()
     # ds_loss_meter = AverageMeter()
     acc_meter = AverageMeter()
 
@@ -83,6 +84,7 @@ def part_attention_vit_do_train_with_amp(cfg,
         reid_loss_meter.reset()
         acc_meter.reset()
         pc_loss_meter.reset()
+        domain_loss_meter.reset()
         evaluator.reset()
         scheduler.step(epoch)
         model.train()
@@ -128,10 +130,21 @@ def part_attention_vit_do_train_with_amp(cfg,
                     loss2: reid-specific loss
                     (ID + Triplet loss)
                     '''
-                    reid_loss = loss_fn(score, layerwise_global_feat[-1], target, target_cam=target_cam, domain_logits=domain_logits, all_posvid=all_posvid, soft_label=cfg.MODEL.SOFT_LABEL, soft_weight=cfg.MODEL.SOFT_WEIGHT, soft_lambda=cfg.MODEL.SOFT_LAMBDA, class_labels=t_classes)
+                    loss_out = loss_fn(score, layerwise_global_feat[-1], target, target_cam=target_cam, domain_logits=domain_logits, all_posvid=all_posvid, soft_label=cfg.MODEL.SOFT_LABEL, soft_weight=cfg.MODEL.SOFT_WEIGHT, soft_lambda=cfg.MODEL.SOFT_LAMBDA, class_labels=t_classes, return_components=True)
                 else:
                     ploss = torch.tensor([0.]).cuda()
-                    reid_loss = loss_fn(score, layerwise_global_feat[-1], target, target_cam=target_cam, domain_logits=domain_logits, soft_label=cfg.MODEL.SOFT_LABEL, class_labels=t_classes)
+                    loss_out = loss_fn(score, layerwise_global_feat[-1], target, target_cam=target_cam, domain_logits=domain_logits, soft_label=cfg.MODEL.SOFT_LABEL, class_labels=t_classes, return_components=True)
+
+                if isinstance(loss_out, tuple):
+                    reid_loss, loss_components = loss_out
+                else:
+                    reid_loss = loss_out
+                    loss_components = {}
+
+                domain_loss_value = loss_components.get('domain_loss', 0.0)
+                if torch.is_tensor(domain_loss_value):
+                    domain_loss_value = domain_loss_value.item()
+                domain_loss_meter.update(domain_loss_value, img.shape[0])
                 
                 total_loss = reid_loss + l_ploss*ploss
 
@@ -153,10 +166,11 @@ def part_attention_vit_do_train_with_amp(cfg,
 
             torch.cuda.synchronize()
             if (n_iter + 1) % log_period == 0:
-                logger.info("Epoch[{}] Iteration[{}/{}] total_loss: {:.3f}, reid_loss: {:.3f}, pc_loss: {:.3f}, Acc: {:.3f}, Base Lr: {:.2e}"
+                logger.info("Epoch[{}] Iteration[{}/{}] total_loss: {:.3f}, reid_loss: {:.3f}, domain_loss: {:.3f}, pc_loss: {:.3f}, Acc: {:.3f}, Base Lr: {:.2e}"
                 .format(epoch, n_iter+1, len(train_loader), total_loss_meter.avg,
-                reid_loss_meter.avg, pc_loss_meter.avg, acc_meter.avg, scheduler._get_lr(epoch)[0]))
+                reid_loss_meter.avg, domain_loss_meter.avg, pc_loss_meter.avg, acc_meter.avg, scheduler._get_lr(epoch)[0]))
                 tbWriter.add_scalar('train/reid_loss', reid_loss_meter.avg, n_iter+1+(epoch-1)*len(train_loader))
+                tbWriter.add_scalar('train/domain_loss', domain_loss_meter.avg, n_iter+1+(epoch-1)*len(train_loader))
                 tbWriter.add_scalar('train/acc', acc_meter.avg, n_iter+1+(epoch-1)*len(train_loader))
                 tbWriter.add_scalar("train/pc_loss", pc_loss_meter.avg, n_iter+1+(epoch-1)*len(train_loader))
 
