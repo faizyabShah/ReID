@@ -8,7 +8,7 @@ MODEL:
   NO_MARGIN: True
   DEVICE_ID: ('0')
   TRANSFORMER_TYPE: 'vit_large_patch16_224_TransReID'
-  STRIDE_SIZE: [16, 16]
+  STRIDE_SIZE: [12, 12]
 
 INPUT:
   SIZE_TRAIN: [256,128]
@@ -27,10 +27,11 @@ INPUT:
     CONTRAST: 0.3
     SATURATION: 0.2
     HUE: 0.1
-  REA:
+  RPT:
     ENABLED: True
-    PROB: 0.5
-
+    PROB: 0.3
+  STOCHASTIC_AUG:
+    ENABLED: True
 
 DATASETS:
   TRAIN: ('UrbanElementsReID',)

@@ -41,6 +41,36 @@ class Solarization(object):
         else:
             return img
 
+
+class StochasticAugmentation:
+    """
+    Randomly select 0, 1, or 2 augmentations per image.
+    Probabilities: none=0.15, one=0.45, two=0.40 (Díaz Benito et al., ICIPW 2025).
+    Pool: ColorJitter, RandomPerspective, RandomRotation, RandomResizedCrop.
+    RPT is kept separate (stateful patch pool) and added independently via do_rpt.
+    """
+    def __init__(self, size, cj_brightness=0.3, cj_contrast=0.3,
+                 cj_saturation=0.2, cj_hue=0.1,
+                 num_probs=(0.15, 0.45, 0.40)):
+        self.aug_pool = [
+            T.ColorJitter(brightness=cj_brightness, contrast=cj_contrast,
+                          saturation=cj_saturation, hue=cj_hue),
+            T.RandomPerspective(distortion_scale=0.3, p=1.0),
+            T.RandomRotation(degrees=15),
+            T.RandomResizedCrop(size=size, scale=(0.7, 1.0), ratio=(0.4, 2.0)),
+        ]
+        self.num_probs = list(num_probs)
+
+    def __call__(self, img):
+        num_augs = random.choices([0, 1, 2], weights=self.num_probs, k=1)[0]
+        if num_augs == 0:
+            return img
+        selected = random.sample(self.aug_pool, min(num_augs, len(self.aug_pool)))
+        for aug in selected:
+            img = aug(img)
+        return img
+
+
 def build_transforms(cfg, is_train=True, is_fake=False):
     res = []
 
@@ -94,7 +124,19 @@ def build_transforms(cfg, is_train=True, is_fake=False):
                         T.RandomCrop(size_train)])
         if do_lgt:
             res.append(LGT(lgt_prob))
-        if do_cj:
+        do_stochastic_aug = cfg.INPUT.STOCHASTIC_AUG.ENABLED
+        if do_stochastic_aug:
+            res.append(StochasticAugmentation(
+                size=tuple(size_train),
+                cj_brightness=cj_brightness,
+                cj_contrast=cj_contrast,
+                cj_saturation=cj_saturation,
+                cj_hue=cj_hue,
+                num_probs=[cfg.INPUT.STOCHASTIC_AUG.PROB_NONE,
+                           cfg.INPUT.STOCHASTIC_AUG.PROB_ONE,
+                           cfg.INPUT.STOCHASTIC_AUG.PROB_TWO],
+            ))
+        elif do_cj:
             res.append(T.RandomApply([T.ColorJitter(cj_brightness, cj_contrast, cj_saturation, cj_hue)], p=cj_prob))
         if do_augmix:
             res.append(AugMix())
