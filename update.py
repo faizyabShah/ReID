@@ -1,6 +1,7 @@
 import os
 import csv
 import torch
+import torch.nn.functional as F
 import argparse
 
 import numpy as np
@@ -133,33 +134,72 @@ def apply_class_based_reranking(q_g_dist, q_q_dist, g_g_dist, query_classes, gal
 
     return final_dist
 
-def extract_feature(model, dataloaders, num_query):
-    """Extract features and collect camera IDs for CAJ adjustment."""
+def extract_feature(model, dataloaders, num_query, scales=None, combine_method='avg'):
+    """Extract features and collect camera IDs for CAJ adjustment.
+
+    Supports multi-resolution test-time augmentation. `scales` is a list of
+    scale multipliers relative to the input batch size (e.g. [1.0, 0.9, 1.1]).
+    `combine_method` can be 'avg' (default) or 'max'. The function will run
+    the model on each scaled variant and on its horizontal flip, then combine
+    per-image descriptors.
+    """
     features = []
     camids = []
     count = 0
     img_path = []
 
+    # default scales fallback
+    if scales is None:
+        scales = getattr(cfg.TEST, 'SCALES', None) or [1.0]
+
     for data in dataloaders:
         img = data['images']
         camid = data['camid']
-        #obtain values form dict data
+        # obtain values from dict data
         n, c, h, w = img.size()
         count += n
-        # ff = torch.FloatTensor(n, 1024).zero_().cuda()  # 2048 is pool5 of resnet
-        for i in range(2):
-            input_img = img.cuda()
-            if i == 1:
-                input_img = torch.flip(input_img, dims=[-1])
-            outputs = model(input_img)
-            f = outputs.float()
-            if i == 0:
-                ff = torch.zeros(n, f.shape[1], device=f.device)
-            ff = ff + f
+
+        agg_feats = None
+        max_feats = []
+
+        for scale in scales:
+            if scale == 1.0:
+                scaled = img
+            else:
+                new_h = max(1, int(round(h * scale)))
+                new_w = max(1, int(round(w * scale)))
+                scaled = F.interpolate(img, size=(new_h, new_w), mode='bilinear', align_corners=False)
+
+            for flip_i in range(2):
+                input_img = scaled.cuda()
+                if flip_i == 1:
+                    input_img = torch.flip(input_img, dims=[-1])
+
+                outputs = model(input_img)
+                f = outputs.float()
+
+                if agg_feats is None:
+                    agg_feats = torch.zeros(n, f.shape[1], device=f.device)
+
+                if combine_method == 'avg':
+                    agg_feats = agg_feats + f
+                elif combine_method == 'max':
+                    max_feats.append(f)
+                else:
+                    agg_feats = agg_feats + f
+
+        if combine_method == 'avg':
+            ff = agg_feats / (len(scales) * 2)
+        elif combine_method == 'max':
+            ff = torch.stack(max_feats, dim=0).max(dim=0)[0]
+        else:
+            ff = agg_feats / (len(scales) * 2)
+
         fnorm = torch.norm(ff, p=2, dim=1, keepdim=True)
         ff = ff.div(fnorm.expand_as(ff))
         features.append(ff)
         camids.extend(np.asarray(camid))
+
     features = torch.cat(features, 0)
     camids = np.array(camids)
 
@@ -213,8 +253,12 @@ if __name__ == "__main__":
             do_inf_pat(cfg, model, val_loader, num_query)
         else:
             do_inf(cfg, model, val_loader, num_query)
+    # read optional multi-scale settings from config
+    scales = getattr(cfg.TEST, 'SCALES', None)
+    combine_method = getattr(cfg.TEST, 'SCALE_COMBINE', 'avg')
+
     with torch.no_grad():
-        qf, gf, q_camids, g_camids = extract_feature(model, val_loader, num_query)
+        qf, gf, q_camids, g_camids = extract_feature(model, val_loader, num_query, scales=scales, combine_method=combine_method)
 
     # save feature
     qf=qf.cpu().numpy()

@@ -223,6 +223,17 @@ _C.TEST.NECK_FEAT = 'after'
 # Whether feature is nomalized before test, if yes, it is equivalent to cosine distance
 _C.TEST.FEAT_NORM = True
 
+# -----------------------------------------------------------------------------
+# Multi-scale test-time augmentation (TTA) defaults
+# -----------------------------------------------------------------------------
+# List of scale multipliers to evaluate at test-time (e.g. [1.0, 0.9, 1.1]).
+# If None, multi-scale TTA is disabled and a single scale (1.0) is used.
+_C.TEST.SCALES = None
+# How to combine features from different scales: 'avg' or 'max'.
+_C.TEST.SCALE_COMBINE = 'avg'
+# Master switch to explicitly enable multi-scale testing (keeps default off).
+_C.TEST.DO_MULTI_SCALE = False
+
 # Name for saving the distmat after testing.
 _C.TEST.DIST_MAT = "dist_mat.npy"
 # Whether calculate the eval score option: 'True', 'False'
