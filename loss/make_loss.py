@@ -26,7 +26,14 @@ def make_loss(cfg, num_classes):
             return F.cross_entropy(score, target)
 
     elif cfg.DATALOADER.SAMPLER == 'softmax_triplet':
-        def loss_func(score, feat, target, target_cam=None, class_labels=None, **kwargs):
+        def loss_func(score, feat, target, target_cam=None, class_labels=None, domain_logits=None, **kwargs):
+            domain_loss = 0.0
+            if cfg.MODEL.DOMAIN_ADV.ENABLED and domain_logits is not None and target_cam is not None:
+                if isinstance(domain_logits, list):
+                    domain_loss = sum(F.cross_entropy(logit, target_cam) for logit in domain_logits) / len(domain_logits)
+                else:
+                    domain_loss = F.cross_entropy(domain_logits, target_cam)
+
             if cfg.MODEL.METRIC_LOSS_TYPE == 'triplet':
                 if cfg.MODEL.IF_LABELSMOOTH == 'on':
                     if isinstance(score, list):
@@ -44,7 +51,8 @@ def make_loss(cfg, num_classes):
                             TRI_LOSS = triplet(feat, target, class_labels=class_labels)[0]
 
                     return cfg.MODEL.ID_LOSS_WEIGHT * ID_LOSS + \
-                               cfg.MODEL.TRIPLET_LOSS_WEIGHT * TRI_LOSS
+                               cfg.MODEL.TRIPLET_LOSS_WEIGHT * TRI_LOSS + \
+                               cfg.MODEL.DOMAIN_ADV.LAMBDA * domain_loss
                 else:
                     if isinstance(score, list):
                         ID_LOSS = [F.cross_entropy(scor, target) for scor in score[1:]]
@@ -61,7 +69,8 @@ def make_loss(cfg, num_classes):
                             TRI_LOSS = triplet(feat, target, class_labels=class_labels)[0]
 
                     return cfg.MODEL.ID_LOSS_WEIGHT * ID_LOSS + \
-                               cfg.MODEL.TRIPLET_LOSS_WEIGHT * TRI_LOSS
+                               cfg.MODEL.TRIPLET_LOSS_WEIGHT * TRI_LOSS + \
+                               cfg.MODEL.DOMAIN_ADV.LAMBDA * domain_loss
             else:
                 print('expected METRIC_LOSS_TYPE should be triplet'
                       'but got {}'.format(cfg.MODEL.METRIC_LOSS_TYPE))

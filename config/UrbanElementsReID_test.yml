@@ -8,6 +8,12 @@ MODEL:
   NAME: 'part_attention_vit'
   NO_MARGIN: True
   DEVICE_ID: ('0')
+  DOMAIN_ADV:
+    ENABLED: True
+    LAMBDA: 1.0
+    HIDDEN_DIM: 256
+    DROPOUT: 0.5
+    NUM_DOMAINS: 4
   TRANSFORMER_TYPE: 'vit_large_patch16_224_TransReID'
   STRIDE_SIZE: [16, 16]
 
@@ -32,6 +38,7 @@ DATALOADER:
   SAMPLER: 'softmax_triplet'
   NUM_INSTANCE: 4
   NUM_WORKERS: 8
+  CAMERA_TO_DOMAIN: True
 
 SOLVER:
   OPTIMIZER_NAME: 'SGD'
