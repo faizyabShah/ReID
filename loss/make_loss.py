@@ -28,7 +28,7 @@ def make_loss(cfg, num_classes):
     elif cfg.DATALOADER.SAMPLER == 'softmax_triplet':
         def loss_func(score, feat, target, target_cam=None, class_labels=None, domain_logits=None, **kwargs):
             domain_loss = 0.0
-            if cfg.MODEL.DOMAIN_ADV.ENABLED and domain_logits is not None and target_cam is not None:
+            if getattr(cfg.MODEL, 'DOMAIN_ADV', None) is not None and cfg.MODEL.DOMAIN_ADV.ENABLED and domain_logits is not None and target_cam is not None:
                 if isinstance(domain_logits, list):
                     domain_loss = sum(F.cross_entropy(logit, target_cam) for logit in domain_logits) / len(domain_logits)
                 else:
