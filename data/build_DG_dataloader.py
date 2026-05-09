@@ -13,12 +13,12 @@ import random
 from . import samplers
 from .common import CommDataset
 from .datasets import DATASET_REGISTRY
-from .transforms import build_transforms
+from .transforms import build_transforms, build_class_specific_transforms
 
 _root = os.getenv("REID_DATASETS", "../../data")
 
 
-def build_reid_train_loader(cfg):
+def build_reid_train_loader(cfg, class_mode=None):
     gettrace = getattr(sys, 'gettrace', None)
     if gettrace():
         print('*'*100)
@@ -28,7 +28,13 @@ def build_reid_train_loader(cfg):
     else:
         num_workers = cfg.DATALOADER.NUM_WORKERS
 
-    train_transforms = build_transforms(cfg, is_train=True, is_fake=False)
+    # Use class-specific transforms if available
+    enable_class_specific = cfg.INPUT.get('ENABLE_CLASS_SPECIFIC_AUG', True) if hasattr(cfg.INPUT, 'get') else True
+    if enable_class_specific:
+        train_transforms = build_class_specific_transforms(cfg, is_train=True, is_fake=False, enable_class_specific=True)
+    else:
+        train_transforms = build_transforms(cfg, is_train=True, is_fake=False)
+    
     train_items = list()
     domain_idx = 0
     camera_all = list()
@@ -36,20 +42,29 @@ def build_reid_train_loader(cfg):
     # try to read a train_classes.csv mapping (cameraID,imageName,pid,Class)
     train_classes_map = {}
     class_to_idx = {}
+    idx_to_class = {}  # Reverse mapping for class ID -> class name
     class_idx_counter = 0
     _root = cfg.DATASETS.ROOT_DIR
     classes_path = os.path.join(_root, 'train_classes.csv')
+    
     def _norm_class_name(s: str) -> str:
+        """Normalize class name to one of the 4 supported classes."""
         key = "".join(ch.lower() for ch in s.strip() if ch.isalnum())
+        
+        # All possible variations for each class
         if key in {"container", "containers"}:
             return "Container"
-        if key in {"rubbishbins", "rubbishbin", "trashbin", "trashbins", "bin", "bins", "wastebin", "wastebins"}:
+        if key in {"rubbishbins", "rubbishbin", "rubbishbin", "trashbin", "trashbins", "bin", "bins", "wastebin", "wastebins"}:
             return "RubbishBins"
-        if key in {"crosswalk", "crosswalks", "zebracrossing", "zebracrosswalk"}:
+        if key in {"crosswalk", "crosswalks", "zebracrossing", "zebracrosswalk", "crossing"}:
             return "Crosswalk"
-        if key in {"trafficsign", "trafficsigns", "trafficsignal", "trafficsignals", "roadsign", "roadsigns"}:
+        if key in {"trafficsign", "trafficsigns", "trafficsignal", "trafficsignals", "roadsign", "roadsigns", "traffic"}:
             return "TrafficSign"
+        
+        # Return original if not matched (will be treated as unknown)
         return s.strip()
+
+    
     if os.path.exists(classes_path):
         try:
             import csv as _csv
@@ -61,6 +76,7 @@ def build_reid_train_loader(cfg):
                     key = img.strip()
                     if cls_n not in class_to_idx:
                         class_to_idx[cls_n] = class_idx_counter
+                        idx_to_class[class_idx_counter] = cls_n  # Store reverse mapping
                         class_idx_counter += 1
                     train_classes_map[key] = class_to_idx[cls_n]
         except Exception:
@@ -83,7 +99,7 @@ def build_reid_train_loader(cfg):
             else:
                 add_info['domains'] = int(domain_idx)
 
-            # attempt to attach class id (if available in train_classes.csv)
+            # attempt to attach class id and name (if available in train_classes.csv)
             try:
                 img_path = dataset.train[i][1]
                 # imageName in train_classes.csv may include prefixes like 'urban/0001.jpg'
@@ -97,6 +113,9 @@ def build_reid_train_loader(cfg):
                         cls_id = train_classes_map[img_basename]
                 if cls_id is not None:
                     add_info['class'] = int(cls_id)
+                    # Add class name for class-specific augmentation
+                    if cls_id in idx_to_class:
+                        add_info['class_name'] = idx_to_class[cls_id]
             except Exception:
                 pass
 
