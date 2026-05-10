@@ -2,8 +2,10 @@ import os
 import csv
 import torch
 import argparse
+import torch.nn as nn
 
 import numpy as np
+from torchvision import models as tv_models
 from config import cfg
 from model import make_model
 from utils.logger import setup_logger
@@ -13,6 +15,24 @@ from processor.ori_vit_processor_with_amp import do_inference as do_inf
 from processor.part_attention_vit_processor import do_inference as do_inf_pat
 
 #from torch.backends import cudnn
+
+TRAFFIC_SIGN_CLASS_NAMES = [
+    "Bus_stop",
+    "Not_allowed_double",
+    "Upside_down_triangle",
+    "Stop",
+    "Bump",
+    "Round_about",
+    "Circle_minus",
+    "Crossing",
+    "Parking",
+    "misc_circles",
+    "Rectangle_roadside",
+    "Warning_triangle",
+    "Not_allowed_single",
+    "Arrow_to_side",
+    "Blue_rectangle",
+]
 
 def read_classes_from_csv(csv_path):
     """Reads the CSV and returns a list of classes in order.
@@ -84,6 +104,66 @@ def apply_caj(q_g_dist, q_q_dist, g_g_dist, q_camids, g_camids,
 
     return q_g_dist, q_q_dist, g_g_dist
 
+def _checkpoint_to_state_dict(checkpoint):
+    if isinstance(checkpoint, dict):
+        for key in ("state_dict", "model_state_dict", "model", "net", "weights"):
+            candidate = checkpoint.get(key)
+            if isinstance(candidate, dict):
+                return candidate
+        return checkpoint
+    if hasattr(checkpoint, "state_dict"):
+        return checkpoint.state_dict()
+    raise ValueError("Unsupported checkpoint format for traffic sign classifier")
+
+def _strip_state_dict_prefix(state_dict):
+    cleaned = {}
+    for key, value in state_dict.items():
+        clean_key = key
+        for prefix in ("module.", "model.", "net."):
+            if clean_key.startswith(prefix):
+                clean_key = clean_key[len(prefix):]
+        cleaned[clean_key] = value
+    return cleaned
+
+def build_traffic_sign_classifier(cfg):
+    classifier = tv_models.resnet18(weights=None)
+    classifier.fc = nn.Linear(classifier.fc.in_features, len(TRAFFIC_SIGN_CLASS_NAMES))
+
+    weight_path = cfg.TEST.TRAFFIC_SIGN_CLASSIFIER.WEIGHT
+    if not weight_path:
+        raise ValueError("TEST.TRAFFIC_SIGN_CLASSIFIER.WEIGHT must be set when the classifier is enabled")
+
+    checkpoint = torch.load(weight_path, map_location="cpu")
+    state_dict = _strip_state_dict_prefix(_checkpoint_to_state_dict(checkpoint))
+    missing_keys, unexpected_keys = classifier.load_state_dict(state_dict, strict=False)
+    if missing_keys or unexpected_keys:
+        print("Traffic-sign classifier checkpoint loaded with partial key matching")
+        if missing_keys:
+            print("Missing keys:", missing_keys)
+        if unexpected_keys:
+            print("Unexpected keys:", unexpected_keys)
+
+    classifier.cuda()
+    classifier.eval()
+    return classifier
+
+def apply_traffic_sign_soft_filter(dist_mat, query_probs, gallery_probs, mode="softmax",
+                                   alpha=0.35, argmax_penalty=0.75):
+    query_probs = np.asarray(query_probs)
+    gallery_probs = np.asarray(gallery_probs)
+
+    if mode == "argmax":
+        query_pred = np.argmax(query_probs, axis=1)[:, np.newaxis]
+        gallery_pred = np.argmax(gallery_probs, axis=1)[np.newaxis, :]
+        mismatch = (query_pred != gallery_pred).astype(np.float32)
+        return dist_mat + argmax_penalty * mismatch
+
+    if mode != "softmax":
+        raise ValueError(f"Unsupported classifier filtering mode: {mode}")
+
+    class_affinity = np.matmul(query_probs, gallery_probs.T)
+    return dist_mat + alpha * (1.0 - class_affinity)
+
 def normalize_class_name(class_name):
     """Normalize class names so dataset-specific aliases share one config key."""
     normalized = str(class_name).strip().lower().replace(" ", "").replace("_", "")
@@ -133,19 +213,20 @@ def apply_class_based_reranking(q_g_dist, q_q_dist, g_g_dist, query_classes, gal
 
     return final_dist
 
-def extract_feature(model, dataloaders, num_query):
+def extract_feature(model, dataloaders, num_query, classifier_model=None,
+                    classifier_temperature=1.0):
     """Extract features and collect camera IDs for CAJ adjustment."""
     features = []
     camids = []
-    count = 0
     img_path = []
+    class_probs = []
 
     for data in dataloaders:
         img = data['images']
         camid = data['camid']
+        batch_paths = data['img_path']
         #obtain values form dict data
         n, c, h, w = img.size()
-        count += n
         # ff = torch.FloatTensor(n, 1024).zero_().cuda()  # 2048 is pool5 of resnet
         for i in range(2):
             input_img = img.cuda()
@@ -160,16 +241,29 @@ def extract_feature(model, dataloaders, num_query):
         ff = ff.div(fnorm.expand_as(ff))
         features.append(ff)
         camids.extend(np.asarray(camid))
+        img_path.extend(list(batch_paths))
+
+        if classifier_model is not None:
+            cls_logits = classifier_model(img.cuda())
+            if classifier_temperature != 1.0:
+                cls_logits = cls_logits / float(classifier_temperature)
+            cls_probs = torch.softmax(cls_logits, dim=1)
+            class_probs.append(cls_probs.detach().cpu())
     features = torch.cat(features, 0)
     camids = np.array(camids)
+    class_probs = torch.cat(class_probs, 0).numpy() if class_probs else None
 
     # query
     qf = features[:num_query]
     q_camids = camids[:num_query]
+    q_img_paths = img_path[:num_query]
+    q_class_probs = class_probs[:num_query] if class_probs is not None else None
     # gallery
     gf = features[num_query:]
     g_camids = camids[num_query:]
-    return qf, gf, q_camids, g_camids
+    g_img_paths = img_path[num_query:]
+    g_class_probs = class_probs[num_query:] if class_probs is not None else None
+    return qf, gf, q_camids, g_camids, q_img_paths, g_img_paths, q_class_probs, g_class_probs
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="ReID Training")
@@ -207,6 +301,10 @@ if __name__ == "__main__":
     model = make_model(cfg, cfg.MODEL.NAME, 0,0,0)
     model.load_param(cfg.TEST.WEIGHT)
 
+    traffic_sign_classifier = None
+    if cfg.TEST.TRAFFIC_SIGN_CLASSIFIER.ENABLED or cfg.TEST.TRAFFIC_SIGN_CLASSIFIER.WEIGHT:
+        traffic_sign_classifier = build_traffic_sign_classifier(cfg)
+
     for testname in cfg.DATASETS.TEST:
         val_loader, num_query = build_reid_test_loader(cfg, testname)
         if cfg.MODEL.NAME == 'part_attention_vit':
@@ -214,7 +312,13 @@ if __name__ == "__main__":
         else:
             do_inf(cfg, model, val_loader, num_query)
     with torch.no_grad():
-        qf, gf, q_camids, g_camids = extract_feature(model, val_loader, num_query)
+        qf, gf, q_camids, g_camids, q_img_paths, g_img_paths, q_class_probs, g_class_probs = extract_feature(
+            model,
+            val_loader,
+            num_query,
+            classifier_model=traffic_sign_classifier,
+            classifier_temperature=cfg.TEST.TRAFFIC_SIGN_CLASSIFIER.TEMPERATURE,
+        )
 
     # save feature
     qf=qf.cpu().numpy()
@@ -258,6 +362,16 @@ if __name__ == "__main__":
             cross_cam_scale=cfg.TEST.CAJ_CROSS_CAM_SCALE,
         )
 
+    if (cfg.TEST.TRAFFIC_SIGN_CLASSIFIER.ENABLED or cfg.TEST.TRAFFIC_SIGN_CLASSIFIER.WEIGHT) and q_class_probs is not None and g_class_probs is not None:
+        re_rank_dist = apply_traffic_sign_soft_filter(
+            re_rank_dist,
+            q_class_probs,
+            g_class_probs,
+            mode=cfg.TEST.TRAFFIC_SIGN_CLASSIFIER.MODE,
+            alpha=cfg.TEST.TRAFFIC_SIGN_CLASSIFIER.ALPHA,
+            argmax_penalty=cfg.TEST.TRAFFIC_SIGN_CLASSIFIER.ARGMAX_PENALTY,
+        )
+
     if cfg.TEST.DO_CLASS_FILTER:
         re_rank_dist = apply_class_penalty(re_rank_dist, query_classes, gallery_classes)
 
@@ -272,7 +386,7 @@ if __name__ == "__main__":
             f_w.write(write_line.encode())
 
 
-    lista_nombres = ["{:06d}.jpg".format(i) for i in range(1, len(indices) + 1)]
+    lista_nombres = [os.path.basename(path) for path in q_img_paths]
     output_path = args.track.split(".txt")[0] + "_submission.csv"
 
     with open(output_path, 'w', newline='') as archivo_csv:

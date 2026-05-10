@@ -247,6 +247,15 @@ _C.TEST.DO_CAJ_ADJUSTMENT = False
 _C.TEST.CAJ_SAME_CAM_PENALTY = 1.1  # >1 penalizes same-camera similarity
 _C.TEST.CAJ_CROSS_CAM_SCALE = 0.95  # <1 favors cross-camera matches
 
+# Optional traffic-sign classifier-based soft filtering
+_C.TEST.TRAFFIC_SIGN_CLASSIFIER = CN()
+_C.TEST.TRAFFIC_SIGN_CLASSIFIER.ENABLED = False
+_C.TEST.TRAFFIC_SIGN_CLASSIFIER.WEIGHT = ""
+_C.TEST.TRAFFIC_SIGN_CLASSIFIER.MODE = "softmax"  # "softmax" or "argmax"
+_C.TEST.TRAFFIC_SIGN_CLASSIFIER.ALPHA = 0.35
+_C.TEST.TRAFFIC_SIGN_CLASSIFIER.ARGMAX_PENALTY = 0.75
+_C.TEST.TRAFFIC_SIGN_CLASSIFIER.TEMPERATURE = 1.0
+
 # Class-based re-ranking with per-class k1/k2/lambda settings
 _C.TEST.DO_CLASS_BASED_RERANKING = False
 _C.TEST.CLASS_BASED_RERANKING_PARAMS = CN()
