@@ -241,7 +241,8 @@ def apply_class_based_reranking(q_g_dist, q_q_dist, g_g_dist, query_classes, gal
 
 def extract_feature(model, dataloaders, num_query, classifier_model=None,
                     classifier_temperature=1.0, semantic_classes=None,
-                    retrieval_tta_sizes=None, classifier_input_size=None):
+                    retrieval_tta_sizes=None, classifier_input_size=None,
+                    use_tta=False):
     """Extract features and collect camera IDs for CAJ adjustment."""
     features = []
     camids = []
@@ -252,10 +253,16 @@ def extract_feature(model, dataloaders, num_query, classifier_model=None,
     if semantic_classes is not None:
         normalized_classes = [normalize_class_name(cls) for cls in semantic_classes]
 
-    if retrieval_tta_sizes is None:
-        retrieval_tta_sizes = [(224, 224), (192, 192), (256, 256), (224, 160)]
     if classifier_input_size is None:
         classifier_input_size = (224, 224)
+    if retrieval_tta_sizes is None:
+        default_sizes = [
+            (224, 224),
+            (224, 192),
+            (192, 224),
+            (256, 224),
+        ]
+        retrieval_tta_sizes = default_sizes if use_tta else [tuple(classifier_input_size)]
 
     sample_offset = 0
 
@@ -267,13 +274,19 @@ def extract_feature(model, dataloaders, num_query, classifier_model=None,
 
         feature_maps = []
         for size in retrieval_tta_sizes:
-            input_img = _resize_batch(img, size).cuda()
-            outputs = model(input_img)
-            feature_maps.append(outputs.float())
+            flips = [False, True] if use_tta else [False]
+            for flip in flips:
+                if flip:
+                    in_img = torch.flip(img, dims=[-1])
+                else:
+                    in_img = img
+                input_img = _resize_batch(in_img, size).cuda()
+                outputs = model(input_img)
+                f = F.normalize(outputs.float(), dim=1)
+                feature_maps.append(f)
 
         ff = torch.stack(feature_maps, dim=0).mean(dim=0)
-        fnorm = torch.norm(ff, p=2, dim=1, keepdim=True)
-        ff = ff.div(fnorm.expand_as(ff))
+        ff = F.normalize(ff, dim=1)
         features.append(ff)
         camids.extend(np.asarray(camid))
         img_path.extend(list(batch_paths))
@@ -386,6 +399,7 @@ if __name__ == "__main__":
             semantic_classes=(query_classes + gallery_classes) if query_classes is not None and gallery_classes is not None else None,
             retrieval_tta_sizes=_cfg_size_list_to_tuples(cfg.TEST.RETRIEVAL_TTA_SIZES),
             classifier_input_size=tuple(cfg.TEST.TRAFFIC_SIGN_CLASSIFIER.INPUT_SIZE),
+            use_tta=getattr(cfg.TEST, 'USE_TTA', False),
         )
 
     # save feature
@@ -398,6 +412,18 @@ if __name__ == "__main__":
     q_q_dist = np.dot(qf, np.transpose(qf))
     g_g_dist = np.dot(gf, np.transpose(gf))
 
+    # Apply Camera-Aware Jaccard adjustment first if enabled (influence reranking topology)
+    if cfg.TEST.DO_CAJ_ADJUSTMENT:
+        q_g_dist, q_q_dist, g_g_dist = apply_caj(
+            q_g_dist,
+            q_q_dist,
+            g_g_dist,
+            q_camids,
+            g_camids,
+            same_cam_penalty=cfg.TEST.CAJ_SAME_CAM_PENALTY,
+            cross_cam_scale=cfg.TEST.CAJ_CROSS_CAM_SCALE,
+        )
+
     if cfg.TEST.DO_CLASS_BASED_RERANKING:
         re_rank_dist = apply_class_based_reranking(
             q_g_dist,
@@ -409,18 +435,6 @@ if __name__ == "__main__":
         )
     else:
         re_rank_dist = re_ranking(q_g_dist, q_q_dist, g_g_dist)
-
-    # Apply Camera-Aware Jaccard adjustment if enabled
-    if cfg.TEST.DO_CAJ_ADJUSTMENT:
-        re_rank_dist, _, _ = apply_caj(
-            re_rank_dist,
-            q_q_dist,
-            g_g_dist,
-            q_camids,
-            g_camids,
-            same_cam_penalty=cfg.TEST.CAJ_SAME_CAM_PENALTY,
-            cross_cam_scale=cfg.TEST.CAJ_CROSS_CAM_SCALE,
-        )
 
     if (cfg.TEST.TRAFFIC_SIGN_CLASSIFIER.ENABLED or cfg.TEST.TRAFFIC_SIGN_CLASSIFIER.WEIGHT) and q_class_probs is not None and g_class_probs is not None:
         re_rank_dist = apply_traffic_sign_soft_filter(

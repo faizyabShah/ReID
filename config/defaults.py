@@ -260,10 +260,13 @@ _C.TEST.TRAFFIC_SIGN_CLASSIFIER.INPUT_SIZE = [224, 224]
 # Retrieval test-time augmentation sizes
 _C.TEST.RETRIEVAL_TTA_SIZES = [
 	[224, 224],
-	[192, 192],
-	[256, 256],
-	[224, 160],
+	[224, 192],
+	[192, 224],
+	[256, 224],
 ]
+
+# Toggle to enable/disable all retrieval TTA (resizes + flips). Defaults to False.
+_C.TEST.USE_TTA = False
 
 # Class-based re-ranking with per-class k1/k2/lambda settings
 _C.TEST.DO_CLASS_BASED_RERANKING = False
