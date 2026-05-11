@@ -255,6 +255,15 @@ _C.TEST.TRAFFIC_SIGN_CLASSIFIER.MODE = "softmax"  # "softmax" or "argmax"
 _C.TEST.TRAFFIC_SIGN_CLASSIFIER.ALPHA = 0.35
 _C.TEST.TRAFFIC_SIGN_CLASSIFIER.ARGMAX_PENALTY = 0.75
 _C.TEST.TRAFFIC_SIGN_CLASSIFIER.TEMPERATURE = 1.0
+_C.TEST.TRAFFIC_SIGN_CLASSIFIER.INPUT_SIZE = [224, 224]
+
+# Retrieval test-time augmentation sizes
+_C.TEST.RETRIEVAL_TTA_SIZES = [
+	[224, 224],
+	[192, 192],
+	[256, 256],
+	[224, 160],
+]
 
 # Class-based re-ranking with per-class k1/k2/lambda settings
 _C.TEST.DO_CLASS_BASED_RERANKING = False

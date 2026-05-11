@@ -3,6 +3,7 @@ import csv
 import torch
 import argparse
 import torch.nn as nn
+import torch.nn.functional as F
 
 import numpy as np
 from torchvision import models as tv_models
@@ -125,6 +126,12 @@ def _strip_state_dict_prefix(state_dict):
         cleaned[clean_key] = value
     return cleaned
 
+def _resize_batch(img, size):
+    return F.interpolate(img, size=size, mode="bilinear", align_corners=False)
+
+def _cfg_size_list_to_tuples(size_list):
+    return [tuple(int(dim) for dim in size) for size in size_list]
+
 def build_traffic_sign_classifier(cfg):
     classifier = tv_models.resnet18(weights=None)
     classifier.fc = nn.Linear(classifier.fc.in_features, len(TRAFFIC_SIGN_CLASS_NAMES))
@@ -233,7 +240,8 @@ def apply_class_based_reranking(q_g_dist, q_q_dist, g_g_dist, query_classes, gal
     return final_dist
 
 def extract_feature(model, dataloaders, num_query, classifier_model=None,
-                    classifier_temperature=1.0, semantic_classes=None):
+                    classifier_temperature=1.0, semantic_classes=None,
+                    retrieval_tta_sizes=None, classifier_input_size=None):
     """Extract features and collect camera IDs for CAJ adjustment."""
     features = []
     camids = []
@@ -244,24 +252,26 @@ def extract_feature(model, dataloaders, num_query, classifier_model=None,
     if semantic_classes is not None:
         normalized_classes = [normalize_class_name(cls) for cls in semantic_classes]
 
+    if retrieval_tta_sizes is None:
+        retrieval_tta_sizes = [(224, 224), (192, 192), (256, 256), (224, 160)]
+    if classifier_input_size is None:
+        classifier_input_size = (224, 224)
+
     sample_offset = 0
 
     for data in dataloaders:
         img = data['images']
         camid = data['camid']
         batch_paths = data['img_path']
-        #obtain values form dict data
         n, c, h, w = img.size()
-        # ff = torch.FloatTensor(n, 1024).zero_().cuda()  # 2048 is pool5 of resnet
-        for i in range(2):
-            input_img = img.cuda()
-            if i == 1:
-                input_img = torch.flip(input_img, dims=[-1])
+
+        feature_maps = []
+        for size in retrieval_tta_sizes:
+            input_img = _resize_batch(img, size).cuda()
             outputs = model(input_img)
-            f = outputs.float()
-            if i == 0:
-                ff = torch.zeros(n, f.shape[1], device=f.device)
-            ff = ff + f
+            feature_maps.append(outputs.float())
+
+        ff = torch.stack(feature_maps, dim=0).mean(dim=0)
         fnorm = torch.norm(ff, p=2, dim=1, keepdim=True)
         ff = ff.div(fnorm.expand_as(ff))
         features.append(ff)
@@ -279,7 +289,7 @@ def extract_feature(model, dataloaders, num_query, classifier_model=None,
             batch_probs = torch.zeros((n, len(TRAFFIC_SIGN_CLASS_NAMES)), dtype=torch.float32)
             if np.any(batch_traffic_mask):
                 traffic_mask_tensor = torch.from_numpy(batch_traffic_mask)
-                traffic_imgs = img[traffic_mask_tensor]
+                traffic_imgs = _resize_batch(img[traffic_mask_tensor], classifier_input_size)
                 cls_logits = classifier_model(traffic_imgs.cuda())
                 if classifier_temperature != 1.0:
                     cls_logits = cls_logits / float(classifier_temperature)
@@ -374,6 +384,8 @@ if __name__ == "__main__":
             classifier_model=traffic_sign_classifier,
             classifier_temperature=cfg.TEST.TRAFFIC_SIGN_CLASSIFIER.TEMPERATURE,
             semantic_classes=(query_classes + gallery_classes) if query_classes is not None and gallery_classes is not None else None,
+            retrieval_tta_sizes=_cfg_size_list_to_tuples(cfg.TEST.RETRIEVAL_TTA_SIZES),
+            classifier_input_size=tuple(cfg.TEST.TRAFFIC_SIGN_CLASSIFIER.INPUT_SIZE),
         )
 
     # save feature
