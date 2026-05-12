@@ -797,14 +797,26 @@ def resize_pos_embed_runtime(posemb, grid_size, num_extra_tokens=1):
     """Resize positional embeddings for the current input grid during inference."""
     extra_tokens = posemb[:, :num_extra_tokens]
     posemb_grid = posemb[:, num_extra_tokens:]
+    # Try to infer the old grid shape. Old checkpoints may have non-square grids
+    # (e.g. 15x16 => 240 tokens). Prefer a square root, otherwise find a factor
+    # pair (h, w) such that h*w == num_tokens. Choose the pair with h <= w.
+    num_grid_tokens = posemb_grid.shape[1]
+    gs_old_h = int(math.sqrt(num_grid_tokens))
+    gs_old_w = gs_old_h
+    if gs_old_h * gs_old_w != num_grid_tokens:
+        # find factor pair by searching downwards from sqrt
+        found = False
+        for h in range(gs_old_h, 0, -1):
+            if num_grid_tokens % h == 0:
+                gs_old_h = h
+                gs_old_w = num_grid_tokens // h
+                found = True
+                break
+        if not found:
+            # fallback: treat as single row
+            gs_old_h, gs_old_w = 1, num_grid_tokens
 
-    gs_old = int(math.sqrt(posemb_grid.shape[1]))
-    if gs_old * gs_old != posemb_grid.shape[1]:
-        raise ValueError(
-            f"Cannot resize positional embedding with non-square token grid: {posemb_grid.shape[1]} tokens"
-        )
-
-    posemb_grid = posemb_grid.reshape(1, gs_old, gs_old, -1).permute(0, 3, 1, 2)
+    posemb_grid = posemb_grid.reshape(1, gs_old_h, gs_old_w, -1).permute(0, 3, 1, 2)
     posemb_grid = F.interpolate(posemb_grid, size=grid_size, mode='bilinear', align_corners=False)
     posemb_grid = posemb_grid.permute(0, 2, 3, 1).reshape(1, grid_size[0] * grid_size[1], -1)
     return torch.cat([extra_tokens, posemb_grid], dim=1)
