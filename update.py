@@ -262,7 +262,7 @@ def extract_feature(model, dataloaders, num_query, classifier_model=None,
             (192, 224),
             (256, 224),
         ]
-        retrieval_tta_sizes = default_sizes if use_tta else [tuple(classifier_input_size)]
+        retrieval_tta_sizes = default_sizes if use_tta else [tuple(cfg.TEST.INPUT_SIZE)]
 
     sample_offset = 0
 
