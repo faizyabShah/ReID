@@ -133,11 +133,11 @@ def apply_class_based_reranking(q_g_dist, q_q_dist, g_g_dist, query_classes, gal
 
     return final_dist
 
-def extract_feature(model, dataloaders, num_query, last_k=6, use_part_tokens=False):
+def extract_feature(model, dataloaders, num_query, last_k=6, use_part_tokens=False, part_tokens_last=1):
     """Extract features with CLS fusion (concat of last K layers' CLS tokens) plus flip TTA.
 
-    If use_part_tokens is True, concatenates the 3 part tokens (positions 1:4)
-    from the final layer onto the fused CLS feature.
+    If use_part_tokens is True, concatenates the 3 part tokens (positions 1:4) from
+    the last `part_tokens_last` layers onto the fused CLS feature.
     """
     features = []
     camids = []
@@ -159,7 +159,10 @@ def extract_feature(model, dataloaders, num_query, last_k=6, use_part_tokens=Fal
             cls_tokens = torch.stack([layer[:, 0] for layer in layerwise_tokens[-last_k:]], dim=1)
             f = cls_tokens.reshape(n, -1)
             if use_part_tokens:
-                part_tokens = layerwise_tokens[-1][:, 1:4].reshape(n, -1)
+                part_tokens = torch.cat(
+                    [layer[:, 1:4].reshape(n, -1) for layer in layerwise_tokens[-part_tokens_last:]],
+                    dim=1,
+                )
                 f = torch.cat([f, part_tokens], dim=1)
             f = f.float()
             if ff is None:
@@ -229,6 +232,7 @@ if __name__ == "__main__":
             model, val_loader, num_query,
             last_k=last_k,
             use_part_tokens=cfg.TEST.USE_PART_TOKENS,
+            part_tokens_last=cfg.TEST.PART_TOKENS_LAST,
         )
 
     # save feature

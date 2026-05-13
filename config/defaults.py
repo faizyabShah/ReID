@@ -240,8 +240,9 @@ _C.TEST.DO_CAJ_ADJUSTMENT = False
 _C.TEST.CAJ_SAME_CAM_PENALTY = 1.1  # >1 penalizes same-camera similarity
 _C.TEST.CAJ_CROSS_CAM_SCALE = 0.95  # <1 favors cross-camera matches
 
-# Concatenate part tokens (positions 1:4 from last layer) onto the fused CLS feature
+# Concatenate part tokens (positions 1:4) onto the fused CLS feature
 _C.TEST.USE_PART_TOKENS = False
+_C.TEST.PART_TOKENS_LAST = 1  # number of trailing layers to draw part tokens from
 
 # Class-based re-ranking with per-class k1/k2/lambda settings
 _C.TEST.DO_CLASS_BASED_RERANKING = False
