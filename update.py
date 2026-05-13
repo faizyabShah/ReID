@@ -134,29 +134,31 @@ def apply_class_based_reranking(q_g_dist, q_q_dist, g_g_dist, query_classes, gal
 
     return final_dist
 
-def extract_feature(model, dataloaders, num_query):
-    """Extract features and collect camera IDs for CAJ adjustment."""
+def extract_feature(model, dataloaders, num_query, last_k=6):
+    """Extract features with CLS fusion (concat of last K layers' CLS tokens) plus flip TTA."""
     features = []
     camids = []
     count = 0
-    img_path = []
+    backbone = model.base
 
     for data in dataloaders:
         img = data['images']
         camid = data['camid']
-        #obtain values form dict data
         n, c, h, w = img.size()
         count += n
-        # ff = torch.FloatTensor(n, 1024).zero_().cuda()  # 2048 is pool5 of resnet
+
+        ff = None
         for i in range(2):
             input_img = img.cuda()
             if i == 1:
                 input_img = torch.flip(input_img, dims=[-1])
-            outputs = model(input_img)
-            f = outputs.float()
-            if i == 0:
+            layerwise_tokens = backbone(input_img)
+            cls_tokens = torch.stack([layer[:, 0] for layer in layerwise_tokens[-last_k:]], dim=1)
+            f = cls_tokens.reshape(n, -1).float()
+            if ff is None:
                 ff = torch.zeros(n, f.shape[1], device=f.device)
             ff = ff + f
+
         fnorm = torch.norm(ff, p=2, dim=1, keepdim=True)
         ff = ff.div(fnorm.expand_as(ff))
         features.append(ff)
@@ -214,8 +216,9 @@ if __name__ == "__main__":
             do_inf_pat(cfg, model, val_loader, num_query)
         else:
             do_inf(cfg, model, val_loader, num_query)
+    last_k = cfg.TEST.CLS_FUSION_LAST if cfg.TEST.CLS_FUSION else 1
     with torch.no_grad():
-        qf, gf, q_camids, g_camids = extract_feature(model, val_loader, num_query)
+        qf, gf, q_camids, g_camids = extract_feature(model, val_loader, num_query, last_k=last_k)
 
     # save feature
     qf=qf.cpu().numpy()
