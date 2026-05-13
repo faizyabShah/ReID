@@ -81,7 +81,6 @@ TEST:
       K1: 14
       K2: 4
       LAMBDA: 0.25
-  MULTI_SCALE_TTA: True
 
 LOG_ROOT: 'models/' # root of log file
 TB_LOG_ROOT: './tb_log/'

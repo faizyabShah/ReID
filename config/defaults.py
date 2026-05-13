@@ -232,17 +232,20 @@ _C.TEST.EVAL = False
 _C.TEST.CLS_FUSION = False
 _C.TEST.CLS_FUSION_LAST = 6
 
-# Multi-scale TTA: average features extracted at several resolutions
-_C.TEST.MULTI_SCALE_TTA = False
-_C.TEST.TTA_SCALES = [[320, 192], [352, 208], [288, 176]]
-
 #class filtering
 _C.TEST.DO_CLASS_FILTER = False
 
-# Camera-Aware Jaccard (CAJ) adjustment for multi-camera scenarios
+# Camera-Aware Jaccard (CAJ) adjustment for multi-camera scenarios — simple distance scaling
 _C.TEST.DO_CAJ_ADJUSTMENT = False
 _C.TEST.CAJ_SAME_CAM_PENALTY = 1.1  # >1 penalizes same-camera similarity
 _C.TEST.CAJ_CROSS_CAM_SCALE = 0.95  # <1 favors cross-camera matches
+
+# Specker's CAJ re-ranking (Chen et al. CVPR 2024, asymmetric k1) — replaces k-reciprocal re-ranking
+_C.TEST.DO_SPECKER_CAJ = False
+_C.TEST.SPECKER_CAJ_K1_INTRA = 3   # small k for same-camera neighbors
+_C.TEST.SPECKER_CAJ_K1_INTER = 30  # large k for cross-camera neighbors
+_C.TEST.SPECKER_CAJ_K2 = 5
+_C.TEST.SPECKER_CAJ_LAMBDA = 0.1
 
 # Class-based re-ranking with per-class k1/k2/lambda settings
 _C.TEST.DO_CLASS_BASED_RERANKING = False
