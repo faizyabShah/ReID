@@ -12,8 +12,8 @@ MODEL:
   STRIDE_SIZE: [16, 16]
 
 INPUT:
-  SIZE_TRAIN: [256,128]
-  SIZE_TEST: [256,128]
+  SIZE_TRAIN: [320, 192]
+  SIZE_TEST: [320, 192]
   REA:
     ENABLED: False
   PIXEL_MEAN: [0.5, 0.5, 0.5]
@@ -81,6 +81,7 @@ TEST:
       K1: 14
       K2: 4
       LAMBDA: 0.25
+  MULTI_SCALE_TTA: True
 
 LOG_ROOT: 'models/' # root of log file
 TB_LOG_ROOT: './tb_log/'

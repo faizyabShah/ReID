@@ -232,6 +232,10 @@ _C.TEST.EVAL = False
 _C.TEST.CLS_FUSION = False
 _C.TEST.CLS_FUSION_LAST = 6
 
+# Multi-scale TTA: average features extracted at several resolutions
+_C.TEST.MULTI_SCALE_TTA = False
+_C.TEST.TTA_SCALES = [[320, 192], [352, 208], [288, 176]]
+
 #class filtering
 _C.TEST.DO_CLASS_FILTER = False
 
