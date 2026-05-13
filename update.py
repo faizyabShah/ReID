@@ -8,7 +8,6 @@ from config import cfg
 from model import make_model
 from utils.logger import setup_logger
 from utils.re_ranking import re_ranking
-from utils.caj_re_ranking import caj_re_ranking_fast
 from data.build_DG_dataloader import build_reid_test_loader
 from processor.ori_vit_processor_with_amp import do_inference as do_inf
 from processor.part_attention_vit_processor import do_inference as do_inf_pat
@@ -134,8 +133,12 @@ def apply_class_based_reranking(q_g_dist, q_q_dist, g_g_dist, query_classes, gal
 
     return final_dist
 
-def extract_feature(model, dataloaders, num_query, last_k=6):
-    """Extract features with CLS fusion (concat of last K layers' CLS tokens) plus flip TTA."""
+def extract_feature(model, dataloaders, num_query, last_k=6, use_part_tokens=False):
+    """Extract features with CLS fusion (concat of last K layers' CLS tokens) plus flip TTA.
+
+    If use_part_tokens is True, concatenates the 3 part tokens (positions 1:4)
+    from the final layer onto the fused CLS feature.
+    """
     features = []
     camids = []
     count = 0
@@ -154,7 +157,11 @@ def extract_feature(model, dataloaders, num_query, last_k=6):
                 input_img = torch.flip(input_img, dims=[-1])
             layerwise_tokens = backbone(input_img)
             cls_tokens = torch.stack([layer[:, 0] for layer in layerwise_tokens[-last_k:]], dim=1)
-            f = cls_tokens.reshape(n, -1).float()
+            f = cls_tokens.reshape(n, -1)
+            if use_part_tokens:
+                part_tokens = layerwise_tokens[-1][:, 1:4].reshape(n, -1)
+                f = torch.cat([f, part_tokens], dim=1)
+            f = f.float()
             if ff is None:
                 ff = torch.zeros(n, f.shape[1], device=f.device)
             ff = ff + f
@@ -218,7 +225,11 @@ if __name__ == "__main__":
             do_inf(cfg, model, val_loader, num_query)
     last_k = cfg.TEST.CLS_FUSION_LAST if cfg.TEST.CLS_FUSION else 1
     with torch.no_grad():
-        qf, gf, q_camids, g_camids = extract_feature(model, val_loader, num_query, last_k=last_k)
+        qf, gf, q_camids, g_camids = extract_feature(
+            model, val_loader, num_query,
+            last_k=last_k,
+            use_part_tokens=cfg.TEST.USE_PART_TOKENS,
+        )
 
     # save feature
     qf=qf.cpu().numpy()
@@ -238,16 +249,7 @@ if __name__ == "__main__":
         query_classes = read_classes_from_csv(query_csv_path)
         gallery_classes = read_classes_from_csv(gallery_csv_path)
 
-    if cfg.TEST.DO_SPECKER_CAJ:
-        re_rank_dist = caj_re_ranking_fast(
-            q_g_dist, q_q_dist, g_g_dist,
-            q_camids, g_camids,
-            k1_intra=cfg.TEST.SPECKER_CAJ_K1_INTRA,
-            k1_inter=cfg.TEST.SPECKER_CAJ_K1_INTER,
-            k2=cfg.TEST.SPECKER_CAJ_K2,
-            lambda_value=cfg.TEST.SPECKER_CAJ_LAMBDA,
-        )
-    elif cfg.TEST.DO_CLASS_BASED_RERANKING:
+    if cfg.TEST.DO_CLASS_BASED_RERANKING:
         re_rank_dist = apply_class_based_reranking(
             q_g_dist,
             q_q_dist,

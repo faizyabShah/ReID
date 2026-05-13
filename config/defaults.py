@@ -240,12 +240,8 @@ _C.TEST.DO_CAJ_ADJUSTMENT = False
 _C.TEST.CAJ_SAME_CAM_PENALTY = 1.1  # >1 penalizes same-camera similarity
 _C.TEST.CAJ_CROSS_CAM_SCALE = 0.95  # <1 favors cross-camera matches
 
-# Specker's CAJ re-ranking (Chen et al. CVPR 2024, asymmetric k1) — replaces k-reciprocal re-ranking
-_C.TEST.DO_SPECKER_CAJ = False
-_C.TEST.SPECKER_CAJ_K1_INTRA = 3   # small k for same-camera neighbors
-_C.TEST.SPECKER_CAJ_K1_INTER = 30  # large k for cross-camera neighbors
-_C.TEST.SPECKER_CAJ_K2 = 5
-_C.TEST.SPECKER_CAJ_LAMBDA = 0.1
+# Concatenate part tokens (positions 1:4 from last layer) onto the fused CLS feature
+_C.TEST.USE_PART_TOKENS = False
 
 # Class-based re-ranking with per-class k1/k2/lambda settings
 _C.TEST.DO_CLASS_BASED_RERANKING = False
