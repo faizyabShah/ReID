@@ -302,7 +302,8 @@ class build_part_attention_vit(nn.Module):
         elif self.pretrain_choice == 'self':
             print("Loading self-trained checkpoint")
             self.load_param(self.model_path)
-
+        if cfg.MODEL.GRAD_CHECKPOINTING:
+            self.base.set_grad_checkpointing(True)
         self.bottleneck = nn.BatchNorm1d(self.in_planes)
         self.bottleneck.bias.requires_grad_(False)
         self.bottleneck.apply(weights_init_kaiming)

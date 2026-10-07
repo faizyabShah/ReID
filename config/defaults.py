@@ -80,6 +80,7 @@ _C.MODEL.SOFT_LABEL = True
 _C.MODEL.CLUSTER_K = 10 # num of clusters
 _C.MODEL.SOFT_WEIGHT = 0.5
 _C.MODEL.SOFT_LAMBDA = 0.5
+_C.MODEL.GRAD_CHECKPOINTING = False
 
 # Split training into a traffic-only model and a non-traffic model.
 _C.MODEL.CLASS_SPLIT_MODE = 'all'  # options: 'all', 'traffic', 'non_traffic', 'dual'
@@ -229,6 +230,7 @@ _C.SOLVER.EVAL_PERIOD = 10
 # This is global, so if we have 8 GPUs and IMS_PER_BATCH = 128, each GPU will
 # contain 16 images per batch
 _C.SOLVER.IMS_PER_BATCH = 64
+_C.SOLVER.GRAD_ACCUM_STEPS = 1
 
 # ---------------------------------------------------------------------------- #
 # TEST

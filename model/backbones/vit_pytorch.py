@@ -26,6 +26,7 @@ from itertools import repeat
 import random
 
 import torch
+import torch.utils.checkpoint
 import torch.nn as nn
 import torch.nn.functional as F
 import collections.abc as container_abcs
@@ -624,6 +625,7 @@ class part_Attention_ViT(nn.Module):
             for i in range(depth)])
             
         self.depth = depth
+        self.use_checkpoint = False
         self.norm = norm_layer(embed_dim)
 
         # Classifier head
@@ -673,6 +675,9 @@ class part_Attention_ViT(nn.Module):
         self.num_classes = num_classes
         self.fc = nn.Linear(self.embed_dim, num_classes) if num_classes > 0 else nn.Identity()
 
+    def set_grad_checkpointing(self, enable=True):
+        self.use_checkpoint = enable
+
     def forward_features(self, x):
         B = x.shape[0]
         x = self.patch_embed(x)
@@ -700,7 +705,10 @@ class part_Attention_ViT(nn.Module):
         # for i in range(B):
         mask[:, 0] = self.attn_mask_generate(current_num_patches, grid_h, grid_w, x.device.type)
         for blk in self.blocks:
-            x = blk(x, mask)
+            if self.use_checkpoint and self.training:
+                x = torch.utils.checkpoint.checkpoint(blk, x, mask)
+            else:
+                x = blk(x, mask)
             layerwise_tokens.append(x)
         layerwise_tokens = [self.norm(t) for t in layerwise_tokens]
         return layerwise_tokens
