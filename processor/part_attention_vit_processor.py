@@ -72,7 +72,10 @@ def part_attention_vit_do_train_with_amp(cfg,
                     class_ids = class_ids.cuda(non_blocking=True)
 
                 # compute output
-                outputs = model(input, class_ids=class_ids)
+                # class-conditioned attention queries (AttQueryCond)
+                class_id = informations['others']['cond_class_id'].to(input.device) if cfg.MODEL.CLASS_COND_QUERY else None
+
+                outputs = model(input, class_ids=class_ids, class_id=class_id)
                 if len(outputs) == 4:
                     _, _, layerwise_feat_list, _ = outputs
                 else:
@@ -118,10 +121,11 @@ def part_attention_vit_do_train_with_amp(cfg,
                 t_classes = t_classes.to(device)
             if class_ids is not None:
                 class_ids = class_ids.to(device)
+            class_id = informations['others']['cond_class_id'].to(device) if cfg.MODEL.CLASS_COND_QUERY else None
 
             model.to(device)
             with amp.autocast(enabled=True):
-                outputs = model(img, class_ids=class_ids)
+                outputs = model(img, class_ids=class_ids, class_id=class_id)
                 if len(outputs) == 4:
                     score, layerwise_global_feat, layerwise_feat_list, domain_logits = outputs
                 else:

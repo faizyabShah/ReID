@@ -70,6 +70,9 @@ _C.MODEL.PATCH_EMBED_TYPE = ''
 # fixed patch embed or not
 _C.MODEL.FREEZE_PATCH_EMBED = True
 
+# number of object categories for query conditioning (trashbin/container/trafficsign/crosswalk)
+_C.MODEL.NUM_OBJECT_CLASSES = 4
+
 # part views
 _C.MODEL.PC_SCALE = 0.02
 _C.MODEL.PC_LOSS = True
@@ -83,6 +86,8 @@ _C.MODEL.SOFT_LAMBDA = 0.5
 _C.MODEL.GRAD_CHECKPOINTING = False
 # Class-wise PAT part masks: vertical part bands for crosswalks during training (narmyn/trainingvitlarge64)
 _C.MODEL.CLASSWISE_PART_MASK = False
+# Class-conditioned attention queries Q = (X + 0.1 c) W_Q during training (AttQueryCond)
+_C.MODEL.CLASS_COND_QUERY = False
 
 # Split training into a traffic-only model and a non-traffic model.
 _C.MODEL.CLASS_SPLIT_MODE = 'all'  # options: 'all', 'traffic', 'non_traffic', 'dual'

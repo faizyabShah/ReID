@@ -289,7 +289,9 @@ class build_part_attention_vit(nn.Module):
             drop_path_rate=cfg.MODEL.DROP_PATH,
             drop_rate= cfg.MODEL.DROP_OUT,
             attn_drop_rate=cfg.MODEL.ATT_DROP_RATE,
-            pretrain_tag=pretrain_tag)
+            pretrain_tag=pretrain_tag,
+            num_object_classes=cfg.MODEL.NUM_OBJECT_CLASSES,
+            class_cond_query=cfg.MODEL.CLASS_COND_QUERY)
         if cfg.MODEL.TRANSFORMER_TYPE == 'deit_small_patch16_224_TransReID':
             self.in_planes = 384
         elif cfg.MODEL.TRANSFORMER_TYPE == 'deit_tiny_patch16_224_TransReID':
@@ -322,13 +324,14 @@ class build_part_attention_vit(nn.Module):
                 lambda_=domain_cfg.LAMBDA,
             )
 
-    def forward(self, x, class_ids=None):
+    def forward(self, x, class_ids=None, class_id=None):
         """
         Args:
             x: input images [B, C, H, W]
-            class_ids: tensor [B] of class IDs, or None
+            class_ids: tensor [B] of class IDs for class-wise part masks, or None
+            class_id: tensor [B] of class IDs for query conditioning (AttQueryCond), or None
         """
-        layerwise_tokens = self.base(x, class_ids=class_ids)  # pass class_ids to backbone
+        layerwise_tokens = self.base(x, class_ids=class_ids, class_id=class_id)  # pass class ids to backbone
         layerwise_cls_tokens = [t[:, 0] for t in layerwise_tokens]  # cls token
         part_feat_list = layerwise_tokens[-1][:, 1: 4]  # 3, 768
     

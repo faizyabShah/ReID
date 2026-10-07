@@ -213,10 +213,17 @@ class part_Attention(nn.Module):
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
 
-    def forward(self, x, mask=None):
+    def forward(self, x, mask=None, class_emb=None):
         B, N, C = x.shape
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
         q, k, v = qkv[0], qkv[1], qkv[2]   # make torchscript happy (cannot use tensor as tuple)
+
+        # Q = (X + c)W_Q: bias queries toward class-relevant features
+        if class_emb is not None:
+            # class_emb: [B, C] -> [B, num_heads, 1, head_dim], broadcast over N
+            c = class_emb.to(q.dtype).reshape(B, self.num_heads, C // self.num_heads).unsqueeze(2)
+            q = q + 0.1 * c
+
         # add mask to q k v
         mask = mask.to(q.device.type)
 
@@ -267,9 +274,8 @@ class part_Attention_Block(nn.Module):
         mlp_hidden_dim = int(dim * mlp_ratio)
         self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
 
-    def forward(self, x, mask = None):
-        # part attention
-        x = x + self.drop_path(self.part_attn(self.norm1(x), mask))
+    def forward(self, x, mask=None, class_emb=None):
+        x = x + self.drop_path(self.part_attn(self.norm1(x), mask, class_emb))
         x = x + self.drop_path(self.mlp(self.norm2(x)))
         return x
 
@@ -576,7 +582,7 @@ our part attention vit
 '''
 class part_Attention_ViT(nn.Module):
     def __init__(self, img_size=224, patch_size=16, stride_size=16, in_chans=3, num_classes=1000, embed_dim=768, depth=12,
-                 num_heads=12, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop_rate=0., attn_drop_rate=0., drop_path_rate=0., hybrid_backbone=None, norm_layer=nn.LayerNorm, **kwargs):
+                 num_heads=12, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop_rate=0., attn_drop_rate=0., drop_path_rate=0., hybrid_backbone=None, norm_layer=nn.LayerNorm, num_object_classes=4, class_cond_query=False, **kwargs):
         super().__init__()
         self.num_classes = num_classes
         self.num_features = self.embed_dim = embed_dim  # num_features for consistency with other models
@@ -627,6 +633,9 @@ class part_Attention_ViT(nn.Module):
         self.depth = depth
         self.use_checkpoint = False
         self.norm = norm_layer(embed_dim)
+
+        # class embedding for query conditioning (one vector per object category; AttQueryCond)
+        self.class_embed = nn.Embedding(num_object_classes, embed_dim) if class_cond_query else None
 
         # Classifier head
         self.fc = nn.Linear(embed_dim, num_classes) if num_classes > 0 else nn.Identity()
@@ -700,13 +709,14 @@ class part_Attention_ViT(nn.Module):
     def set_grad_checkpointing(self, enable=True):
         self.use_checkpoint = enable
 
-    def forward_features(self, x, class_ids=None):
+    def forward_features(self, x, class_ids=None, class_id=None):
         """
         Args:
             x: input images [B, C, H, W]
             class_ids: tensor of class IDs [B] or None
                     0=Crosswalk (vertical parts), 1=Container, 2=RubbishBins, 3=TrafficSign (all horizontal)
                     -1 or None = default horizontal parts
+            class_id: AttQueryCond class ids [B] for query conditioning, or None
         """
         B = x.shape[0]
         x = self.patch_embed(x)
@@ -742,17 +752,20 @@ class part_Attention_ViT(nn.Module):
                 for i in range(B):
                     if needs_vertical[i]:
                         mask[i, 0] = mask_v
+        # compute class embedding once; None disables conditioning (e.g. inference without labels)
+        class_emb = self.class_embed(class_id) if (class_id is not None and self.class_embed is not None) else None
+
         for blk in self.blocks:
             if self.use_checkpoint and self.training:
-                x = torch.utils.checkpoint.checkpoint(blk, x, mask)
+                x = torch.utils.checkpoint.checkpoint(blk, x, mask, class_emb)
             else:
-                x = blk(x, mask)
+                x = blk(x, mask, class_emb)
             layerwise_tokens.append(x)
         layerwise_tokens = [self.norm(t) for t in layerwise_tokens]
         return layerwise_tokens
 
-    def forward(self, x, class_ids=None):
-        x = self.forward_features(x, class_ids=class_ids)
+    def forward(self, x, class_ids=None, class_id=None):
+        x = self.forward_features(x, class_ids=class_ids, class_id=class_id)
         return x
 
     def load_param(self, model_path):

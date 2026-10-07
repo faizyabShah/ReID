@@ -23,6 +23,9 @@ CLASS_NAME_TO_ID = {
     'TrafficSign': 3,
 }
 
+# maps object category name -> integer class id used for query conditioning (AttQueryCond)
+_CLASS_MAP = {'Crosswalk': 0, 'Container': 1, 'Trashbin': 2, 'Trafficsign': 3}
+
 @DATASET_REGISTRY.register()
 class UrbanElementsReID(ImageDataset):
 
@@ -163,7 +166,8 @@ class UrbanElementsReID(ImageDataset):
             if include_class and has_classes:
                 # Training: return 4-tuple with class info
                 class_id = CLASS_NAME_TO_ID.get(class_name, -1)
-                add_info = {'class_id': class_id}
+                add_info = {'class_id': class_id,
+                            'cond_class_id': _CLASS_MAP.get(class_name, 0) if class_name is not None else 0}
                 dataset.append((img_path, pid, camid, add_info))
             else:
                 # Query/Gallery: return standard 3-tuple
