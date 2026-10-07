@@ -649,6 +649,28 @@ class part_Attention_ViT(nn.Module):
         mask_[0, 1 : 4] = True
         return mask_
 
+    def attn_mask_generate_vertical(self, N=132, H=16, W=8, device='cuda'):
+        """Generate attention mask with VERTICAL bands (left/center/right).
+        Used for crosswalks where stripes run horizontally and we want to
+        cut across them with vertical slices.
+        
+        Part 1 -> left half   (cols 0 to W/2)
+        Part 2 -> center half (cols W/4 to 3W/4) 
+        Part 3 -> right half  (cols W/2 to W)
+        """
+        mask = torch.ones(N, 1, device=device)
+        mask[1 : 4, 0] = 0
+        mask_ = (mask @ mask.t()).bool()
+        # Vertical bands: swap H/W roles in generate_2d_mask
+        # generate_2d_mask(H, W, left, top, width, height, part, cls_label, device)
+        # For vertical bands: full height, partial width
+        mask_ |= generate_2d_mask(H, W, 0,     0, W/2, H, 1, False, device).bool()  # left half
+        mask_ |= generate_2d_mask(H, W, W/4,   0, W/2, H, 2, False, device).bool()  # center half
+        mask_ |= generate_2d_mask(H, W, W/2,   0, W/2, H, 3, False, device).bool()  # right half
+        mask_[1 : 4, 0] = True
+        mask_[0, 1 : 4] = True
+        return mask_
+
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
             trunc_normal_(m.weight, std=.02)
@@ -678,11 +700,18 @@ class part_Attention_ViT(nn.Module):
     def set_grad_checkpointing(self, enable=True):
         self.use_checkpoint = enable
 
-    def forward_features(self, x):
+    def forward_features(self, x, class_ids=None):
+        """
+        Args:
+            x: input images [B, C, H, W]
+            class_ids: tensor of class IDs [B] or None
+                    0=Crosswalk (vertical parts), 1=Container, 2=RubbishBins, 3=TrafficSign (all horizontal)
+                    -1 or None = default horizontal parts
+        """
         B = x.shape[0]
         x = self.patch_embed(x)
-
-        cls_tokens = self.cls_token.expand(B, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
+    
+        cls_tokens = self.cls_token.expand(B, -1, -1)
         part_token1 = self.part_token1.expand(B, -1, -1)
         part_token2 = self.part_token2.expand(B, -1, -1)
         part_token3 = self.part_token3.expand(B, -1, -1)
@@ -704,6 +733,15 @@ class part_Attention_ViT(nn.Module):
             # mask[:, 0] = self.mask
         # for i in range(B):
         mask[:, 0] = self.attn_mask_generate(current_num_patches, grid_h, grid_w, x.device.type)
+        # Class-wise part masks (narmyn/trainingvitlarge64): crosswalks (class id 0) use
+        # vertical left / centre / right bands instead of horizontal ones
+        if class_ids is not None and class_ids.numel() > 0:
+            needs_vertical = (class_ids == 0)
+            if needs_vertical.any():
+                mask_v = self.attn_mask_generate_vertical(current_num_patches, grid_h, grid_w, x.device.type)
+                for i in range(B):
+                    if needs_vertical[i]:
+                        mask[i, 0] = mask_v
         for blk in self.blocks:
             if self.use_checkpoint and self.training:
                 x = torch.utils.checkpoint.checkpoint(blk, x, mask)
@@ -713,8 +751,8 @@ class part_Attention_ViT(nn.Module):
         layerwise_tokens = [self.norm(t) for t in layerwise_tokens]
         return layerwise_tokens
 
-    def forward(self, x):
-        x = self.forward_features(x)
+    def forward(self, x, class_ids=None):
+        x = self.forward_features(x, class_ids=class_ids)
         return x
 
     def load_param(self, model_path):

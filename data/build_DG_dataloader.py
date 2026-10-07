@@ -85,7 +85,9 @@ def build_reid_train_loader(cfg, class_mode=None):
             dataset = DATASET_REGISTRY.get(d)(root=_root, combineall=cfg.DATASETS.COMBINEALL)
         # Ensure every train item has an add_info dict at index 3 with 'domains' and optional 'class'
         for i, item in enumerate(dataset.train):
-            add_info = {}
+            # reuse the add_info dict a dataset may already provide (e.g. 'class_id' from UrbanElementsReID)
+            add_info = dict(item[3]) if len(item) >= 4 and isinstance(item[3], dict) else {}
+            add_info.setdefault('class_id', -1)
             camera_all.append(dataset.train[i][2])
             if cfg.DATALOADER.CAMERA_TO_DOMAIN:
                 add_info['domains'] = dataset.train[i][2]
@@ -98,9 +100,7 @@ def build_reid_train_loader(cfg, class_mode=None):
             if cls_name is not None:
                 add_info['class_name'] = cls_name
 
-            dataset.train[i] = list(dataset.train[i])
-            dataset.train[i].append(add_info)
-            dataset.train[i] = tuple(dataset.train[i])
+            dataset.train[i] = tuple(list(dataset.train[i][:3]) + [add_info])
         if class_mode is not None:
             train_filtered = []
             for item in dataset.train:

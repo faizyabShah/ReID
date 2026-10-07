@@ -61,17 +61,18 @@ def part_attention_vit_do_train_with_amp(cfg,
         print('initialize the centers')
         model.train()
         for i, informations in enumerate(train_loader):
-            # measure data loading time
             with torch.no_grad():
-                #input = input.cuda(non_blocking=True)
                 input = informations['images'].cuda(non_blocking=True)
                 vid = informations['targets']
                 camid = informations['camid']
                 path = informations['img_path']
-                #input = input.view(-1, input.size(2), input.size(3), input.size(4))
+                # class-wise part masks (narmyn/trainingvitlarge64)
+                class_ids = informations['others'].get('class_id', None) if cfg.MODEL.CLASSWISE_PART_MASK else None
+                if class_ids is not None:
+                    class_ids = class_ids.cuda(non_blocking=True)
 
                 # compute output
-                outputs = model(input)
+                outputs = model(input, class_ids=class_ids)
                 if len(outputs) == 4:
                     _, _, layerwise_feat_list, _ = outputs
                 else:
@@ -105,6 +106,9 @@ def part_attention_vit_do_train_with_amp(cfg,
 
             if n_iter % accum_steps == 0:
                 optimizer.zero_grad()
+
+            # Extract class_ids for class-conditional part attention (narmyn/trainingvitlarge64)
+            class_ids = informations['others'].get('class_id', None) if cfg.MODEL.CLASSWISE_PART_MASK else None
             optimizer.zero_grad()
             img = img.to(device)
             target = vid.to(device)
@@ -112,10 +116,12 @@ def part_attention_vit_do_train_with_amp(cfg,
             t_domains = t_domains.to(device)
             if t_classes is not None:
                 t_classes = t_classes.to(device)
+            if class_ids is not None:
+                class_ids = class_ids.to(device)
 
             model.to(device)
             with amp.autocast(enabled=True):
-                outputs = model(img)
+                outputs = model(img, class_ids=class_ids)
                 if len(outputs) == 4:
                     score, layerwise_global_feat, layerwise_feat_list, domain_logits = outputs
                 else:

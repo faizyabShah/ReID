@@ -81,6 +81,8 @@ _C.MODEL.CLUSTER_K = 10 # num of clusters
 _C.MODEL.SOFT_WEIGHT = 0.5
 _C.MODEL.SOFT_LAMBDA = 0.5
 _C.MODEL.GRAD_CHECKPOINTING = False
+# Class-wise PAT part masks: vertical part bands for crosswalks during training (narmyn/trainingvitlarge64)
+_C.MODEL.CLASSWISE_PART_MASK = False
 
 # Split training into a traffic-only model and a non-traffic model.
 _C.MODEL.CLASS_SPLIT_MODE = 'all'  # options: 'all', 'traffic', 'non_traffic', 'dual'

@@ -39,6 +39,10 @@ class CommDataset(Dataset):
             img_path, pid, camid = self.img_items[index]
             others = {}
         
+        # Ensure class_id exists (default -1 = unknown, horizontal parts; narmyn/trainingvitlarge64)
+        if isinstance(others, dict) and 'class_id' not in others:
+            others['class_id'] = -1
+
         img = read_image(img_path)
         if self.class_label_map or self.class_global_transform_map:
             # narmyn/class-wise-aug: per-class global transform + per-class tensor augmentation
