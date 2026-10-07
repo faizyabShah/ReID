@@ -1,9 +1,30 @@
-# =========================
-# Deep Learning & Weights
-# =========================
+# Weights and checkpoints
 *.pth
 *.pt
 *.ckpt
 *.h5
 *.safetensors
 *.onnx
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+
+# Run outputs (logs, tensorboard, cached features, tracks)
+models/
+tb_log/
+logs/
+*.out
+*.e
+*.npy
+*.pkl
+outputs/
+uam_gridsearch_best.json
+uam_gridsearch_submission.csv
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
