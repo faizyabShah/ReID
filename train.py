@@ -30,8 +30,9 @@ def run_single_training(cfg, class_mode, local_rank):
     val_name = cfg.DATASETS.TEST[0]
     val_loader, num_query = build_reid_test_loader(cfg, val_name, class_mode=class_mode)
     num_classes = len(train_loader.dataset.pids)
+    camera_num = getattr(train_loader.dataset, 'num_cams', None)
     model_name = cfg.MODEL.NAME
-    model = make_model(cfg, modelname=model_name, num_class=num_classes, camera_num=None, view_num=None)
+    model = make_model(cfg, modelname=model_name, num_class=num_classes, camera_num=camera_num, view_num=None)
     if cfg.MODEL.FREEZE_PATCH_EMBED and 'resnet' not in cfg.MODEL.NAME:
         model.base.patch_embed.proj.weight.requires_grad = False
         model.base.patch_embed.proj.bias.requires_grad = False
@@ -69,6 +70,7 @@ def run_single_training(cfg, class_mode, local_rank):
             loss_func,
             num_query, local_rank,
             log_name=split_log_name,
+            camera_num=camera_num,
         )
     else:
         do_train_dict[model_name](
@@ -83,6 +85,7 @@ def run_single_training(cfg, class_mode, local_rank):
             patch_centers=patch_centers,
             pc_criterion=pc_criterion,
             log_name=split_log_name,
+            camera_num=camera_num,
         )
 
 if __name__ == '__main__':

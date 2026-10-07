@@ -19,7 +19,8 @@ def ori_vit_do_train_with_amp(cfg,
              scheduler,
              loss_fn,
              num_query, local_rank,
-             log_name=None):
+             log_name=None,
+             camera_num=None):
     log_period = cfg.SOLVER.LOG_PERIOD
     checkpoint_period = cfg.SOLVER.CHECKPOINT_PERIOD
     eval_period = cfg.SOLVER.EVAL_PERIOD
@@ -73,12 +74,13 @@ def ori_vit_do_train_with_amp(cfg,
 
             model.to(device)
             with amp.autocast(enabled=True):
-                if cfg.MODEL.NAME == 'transformer':
-                    score, feat, domains = model(img, domains=t_domains)
-                    loss = loss_fn(score, feat, target, domains, t_domains)
+                outputs = model(img)
+                if len(outputs) == 3:
+                    score, feat, domain_logits = outputs
                 else:
-                    score, feat = model(img)
-                    loss = loss_fn(score, feat, target)
+                    score, feat = outputs
+                    domain_logits = None
+                loss = loss_fn(score, feat, target, target_cam=target_cam, domain_logits=domain_logits)
 
             scaler.scale(loss).backward()
 
@@ -148,7 +150,7 @@ def ori_vit_do_train_with_amp(cfg,
 
     # final evaluation
     load_path = os.path.join(log_path, cfg.MODEL.NAME + '_{}.pth'.format(best_index))
-    eval_model = make_model(cfg, modelname=cfg.MODEL.NAME, num_class=0, camera_num=None, view_num=None)
+    eval_model = make_model(cfg, modelname=cfg.MODEL.NAME, num_class=0, camera_num=camera_num, view_num=None)
     eval_model.load_param(load_path)
     print('load weights from {}_{}.pth'.format(cfg.MODEL.NAME, best_index))
     for testname in cfg.DATASETS.TEST:

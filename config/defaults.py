@@ -51,6 +51,13 @@ _C.MODEL.IF_LABELSMOOTH = 'on'
 # If train with arcface loss, options: 'True', 'False'
 _C.MODEL.COS_LAYER = False
 
+_C.MODEL.DOMAIN_ADV = CN()
+_C.MODEL.DOMAIN_ADV.ENABLED = False
+_C.MODEL.DOMAIN_ADV.LAMBDA = 1.0
+_C.MODEL.DOMAIN_ADV.HIDDEN_DIM = 256
+_C.MODEL.DOMAIN_ADV.DROPOUT = 0.5
+_C.MODEL.DOMAIN_ADV.NUM_DOMAINS = 0
+
 # Transformer setting
 _C.MODEL.DROP_PATH = 0.1
 _C.MODEL.DROP_OUT = 0.0
@@ -271,6 +278,27 @@ _C.TEST.CAJ_CROSS_CAM_SCALE = 0.95  # <1 favors cross-camera matches
 # Concatenate part tokens (positions 1:4) onto the fused CLS feature
 _C.TEST.USE_PART_TOKENS = False
 _C.TEST.PART_TOKENS_LAST = 1  # number of trailing layers to draw part tokens from
+
+# Optional traffic-sign classifier-based soft filtering
+_C.TEST.TRAFFIC_SIGN_CLASSIFIER = CN()
+_C.TEST.TRAFFIC_SIGN_CLASSIFIER.ENABLED = False
+_C.TEST.TRAFFIC_SIGN_CLASSIFIER.WEIGHT = ""
+_C.TEST.TRAFFIC_SIGN_CLASSIFIER.MODE = "softmax"  # "softmax" or "argmax"
+_C.TEST.TRAFFIC_SIGN_CLASSIFIER.ALPHA = 0.35
+_C.TEST.TRAFFIC_SIGN_CLASSIFIER.ARGMAX_PENALTY = 0.75
+_C.TEST.TRAFFIC_SIGN_CLASSIFIER.TEMPERATURE = 1.0
+_C.TEST.TRAFFIC_SIGN_CLASSIFIER.INPUT_SIZE = [224, 224]
+
+# Retrieval test-time augmentation sizes
+_C.TEST.RETRIEVAL_TTA_SIZES = [
+	[224, 224],
+	[224, 192],
+	[192, 224],
+	[256, 224],
+]
+
+# Toggle to enable/disable all retrieval TTA (resizes + flips). Defaults to False.
+_C.TEST.USE_TTA = False
 
 # Class-based re-ranking with per-class k1/k2/lambda settings
 _C.TEST.DO_CLASS_BASED_RERANKING = False

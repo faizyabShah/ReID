@@ -8,6 +8,7 @@ import torch.nn as nn
 
 from .backbones.resnet import BasicBlock, ResNet, Bottleneck
 from .backbones import vit_base_patch16_224_TransReID, vit_small_patch16_224_TransReID, deit_small_patch16_224_TransReID, vit_large_patch16_224_TransReID
+from .domain_adaptation import DomainAdversarialHead
 
 # alter this to your pre-trained file name
 lup_path_name = {
@@ -164,7 +165,7 @@ class Backbone(nn.Module):
 
 
 class build_vit(nn.Module):
-    def __init__(self, num_classes, cfg, factory):
+    def __init__(self, num_classes, cfg, factory, camera_num=None):
         super(build_vit, self).__init__()
         self.cfg = cfg
         model_path_base = cfg.MODEL.PRETRAIN_PATH
@@ -203,6 +204,18 @@ class build_vit(nn.Module):
         self.bottleneck.bias.requires_grad_(False)
         self.bottleneck.apply(weights_init_kaiming)
 
+        domain_cfg = getattr(cfg.MODEL, 'DOMAIN_ADV', None)
+        num_domains = camera_num if camera_num is not None else getattr(domain_cfg, 'NUM_DOMAINS', 0)
+        self.domain_classifier = None
+        if domain_cfg is not None and domain_cfg.ENABLED and num_domains and num_domains > 1:
+            self.domain_classifier = DomainAdversarialHead(
+                self.in_planes,
+                num_domains,
+                hidden_dim=domain_cfg.HIDDEN_DIM,
+                dropout=domain_cfg.DROPOUT,
+                lambda_=domain_cfg.LAMBDA,
+            )
+
     def forward(self, x):
         if not self.training and self.cfg.TEST.CLS_FUSION:
             layerwise_tokens = self.base(x, return_layerwise=True)
@@ -217,6 +230,9 @@ class build_vit(nn.Module):
 
         if self.training:
             cls_score = self.classifier(feat)
+            if self.domain_classifier is not None:
+                domain_logits = self.domain_classifier(global_feat)
+                return cls_score, global_feat, domain_logits
             return cls_score, global_feat
         else:
             return feat if self.neck_feat == 'after' else global_feat
@@ -246,7 +262,7 @@ class build_vit(nn.Module):
 part attention vit
 '''
 class build_part_attention_vit(nn.Module):
-    def __init__(self, num_classes, cfg, factory, pretrain_tag='imagenet'):
+    def __init__(self, num_classes, cfg, factory, pretrain_tag='imagenet', camera_num=None):
         super().__init__()
         self.cfg = cfg
         model_path_base = cfg.MODEL.PRETRAIN_PATH
@@ -293,6 +309,18 @@ class build_part_attention_vit(nn.Module):
         self.classifier = nn.Linear(self.in_planes, self.num_classes, bias=False)
         self.classifier.apply(weights_init_classifier)
 
+        domain_cfg = getattr(cfg.MODEL, 'DOMAIN_ADV', None)
+        num_domains = camera_num if camera_num is not None else getattr(domain_cfg, 'NUM_DOMAINS', 0)
+        self.domain_classifier = None
+        if domain_cfg is not None and domain_cfg.ENABLED and num_domains and num_domains > 1:
+            self.domain_classifier = DomainAdversarialHead(
+                self.in_planes,
+                num_domains,
+                hidden_dim=domain_cfg.HIDDEN_DIM,
+                dropout=domain_cfg.DROPOUT,
+                lambda_=domain_cfg.LAMBDA,
+            )
+
     def forward(self, x):
         layerwise_tokens = self.base(x) # B, N, C
         layerwise_cls_tokens = [t[:, 0] for t in layerwise_tokens] # cls token
@@ -303,6 +331,9 @@ class build_part_attention_vit(nn.Module):
 
         if self.training:
             cls_score = self.classifier(feat)
+            if self.domain_classifier is not None:
+                domain_logits = self.domain_classifier(layerwise_cls_tokens[-1])
+                return cls_score, layerwise_cls_tokens, layerwise_part_tokens, domain_logits
             return cls_score, layerwise_cls_tokens, layerwise_part_tokens
         else:
             if self.cfg.TEST.CLS_FUSION:
@@ -372,10 +403,10 @@ __factory_LAT_type = {
 
 def make_model(cfg, modelname, num_class, sd_flag=False, head_flag=False, camera_num=None, view_num=None):
     if modelname == 'vit':
-        model = build_vit(num_class, cfg, __factory_T_type)
+        model = build_vit(num_class, cfg, __factory_T_type, camera_num=camera_num)
         print('===========building vit===========')
     elif modelname == 'part_attention_vit':
-        model = build_part_attention_vit(num_class, cfg, __factory_LAT_type)
+        model = build_part_attention_vit(num_class, cfg, __factory_LAT_type, camera_num=camera_num)
         print('===========building our part attention vit===========')
     else:
         model = Backbone(modelname, num_class, cfg)

@@ -21,6 +21,7 @@ def part_attention_vit_do_train_with_amp(cfg,
              scheduler,
              loss_fn,
              num_query, local_rank,
+             camera_num=None,
              patch_centers = None,
              pc_criterion= None,
              log_name=None):
@@ -47,6 +48,7 @@ def part_attention_vit_do_train_with_amp(cfg,
     total_loss_meter = AverageMeter()
     reid_loss_meter = AverageMeter()
     pc_loss_meter = AverageMeter()
+    domain_loss_meter = AverageMeter()
     # ds_loss_meter = AverageMeter()
     acc_meter = AverageMeter()
 
@@ -68,7 +70,11 @@ def part_attention_vit_do_train_with_amp(cfg,
                 #input = input.view(-1, input.size(2), input.size(3), input.size(4))
 
                 # compute output
-                _, _, layerwise_feat_list = model(input)
+                outputs = model(input)
+                if len(outputs) == 4:
+                    _, _, layerwise_feat_list, _ = outputs
+                else:
+                    _, _, layerwise_feat_list = outputs
                 patch_centers.get_soft_label(path, layerwise_feat_list[-1], vid=vid, camid=camid)
         print('initialization done')
     
@@ -81,6 +87,7 @@ def part_attention_vit_do_train_with_amp(cfg,
         reid_loss_meter.reset()
         acc_meter.reset()
         pc_loss_meter.reset()
+        domain_loss_meter.reset()
         evaluator.reset()
         scheduler.step(epoch)
         model.train()
@@ -105,7 +112,12 @@ def part_attention_vit_do_train_with_amp(cfg,
 
             model.to(device)
             with amp.autocast(enabled=True):
-                score, layerwise_global_feat, layerwise_feat_list = model(img)
+                outputs = model(img)
+                if len(outputs) == 4:
+                    score, layerwise_global_feat, layerwise_feat_list, domain_logits = outputs
+                else:
+                    score, layerwise_global_feat, layerwise_feat_list = outputs
+                    domain_logits = None
                 
                 ############## patch learning ######################
                 patch_agent, position = patch_centers.get_soft_label(img_path, layerwise_feat_list[-1], vid=vid, camid=camid)
@@ -121,10 +133,21 @@ def part_attention_vit_do_train_with_amp(cfg,
                     loss2: reid-specific loss
                     (ID + Triplet loss)
                     '''
-                    reid_loss = loss_fn(score, layerwise_global_feat[-1], target, all_posvid=all_posvid, soft_label=cfg.MODEL.SOFT_LABEL, soft_weight=cfg.MODEL.SOFT_WEIGHT, soft_lambda=cfg.MODEL.SOFT_LAMBDA, class_labels=t_classes)
+                    loss_out = loss_fn(score, layerwise_global_feat[-1], target, target_cam=target_cam, domain_logits=domain_logits, all_posvid=all_posvid, soft_label=cfg.MODEL.SOFT_LABEL, soft_weight=cfg.MODEL.SOFT_WEIGHT, soft_lambda=cfg.MODEL.SOFT_LAMBDA, class_labels=t_classes, return_components=True)
                 else:
                     ploss = torch.tensor([0.]).cuda()
-                    reid_loss = loss_fn(score, layerwise_global_feat[-1], target, soft_label=cfg.MODEL.SOFT_LABEL, class_labels=t_classes)
+                    loss_out = loss_fn(score, layerwise_global_feat[-1], target, target_cam=target_cam, domain_logits=domain_logits, soft_label=cfg.MODEL.SOFT_LABEL, class_labels=t_classes, return_components=True)
+
+                if isinstance(loss_out, tuple):
+                    reid_loss, loss_components = loss_out
+                else:
+                    reid_loss = loss_out
+                    loss_components = {}
+
+                domain_loss_value = loss_components.get('domain_loss', 0.0)
+                if torch.is_tensor(domain_loss_value):
+                    domain_loss_value = domain_loss_value.item()
+                domain_loss_meter.update(domain_loss_value, img.shape[0])
                 
                 total_loss = reid_loss + l_ploss*ploss
 
@@ -146,10 +169,11 @@ def part_attention_vit_do_train_with_amp(cfg,
 
             torch.cuda.synchronize()
             if (n_iter + 1) % log_period == 0:
-                logger.info("Epoch[{}] Iteration[{}/{}] total_loss: {:.3f}, reid_loss: {:.3f}, pc_loss: {:.3f}, Acc: {:.3f}, Base Lr: {:.2e}"
+                logger.info("Epoch[{}] Iteration[{}/{}] total_loss: {:.3f}, reid_loss: {:.3f}, domain_loss: {:.3f}, pc_loss: {:.3f}, Acc: {:.3f}, Base Lr: {:.2e}"
                 .format(epoch, n_iter+1, len(train_loader), total_loss_meter.avg,
-                reid_loss_meter.avg, pc_loss_meter.avg, acc_meter.avg, scheduler._get_lr(epoch)[0]))
+                reid_loss_meter.avg, domain_loss_meter.avg, pc_loss_meter.avg, acc_meter.avg, scheduler._get_lr(epoch)[0]))
                 tbWriter.add_scalar('train/reid_loss', reid_loss_meter.avg, n_iter+1+(epoch-1)*len(train_loader))
+                tbWriter.add_scalar('train/domain_loss', domain_loss_meter.avg, n_iter+1+(epoch-1)*len(train_loader))
                 tbWriter.add_scalar('train/acc', acc_meter.avg, n_iter+1+(epoch-1)*len(train_loader))
                 tbWriter.add_scalar("train/pc_loss", pc_loss_meter.avg, n_iter+1+(epoch-1)*len(train_loader))
 
@@ -200,7 +224,7 @@ def part_attention_vit_do_train_with_amp(cfg,
 
     # final evaluation
     load_path = os.path.join(log_path, cfg.MODEL.NAME + '_{}.pth'.format(best_index))
-    eval_model = make_model(cfg, modelname=cfg.MODEL.NAME, num_class=0, camera_num=None, view_num=None)
+    eval_model = make_model(cfg, modelname=cfg.MODEL.NAME, num_class=0, camera_num=camera_num, view_num=None)
     eval_model.load_param(load_path)
     print('load weights from {}_{}.pth'.format(cfg.MODEL.NAME, best_index))
     for testname in cfg.DATASETS.TEST:

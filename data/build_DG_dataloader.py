@@ -77,9 +77,9 @@ def build_reid_train_loader(cfg, class_mode=None):
         # Ensure every train item has an add_info dict at index 3 with 'domains' and optional 'class'
         for i, item in enumerate(dataset.train):
             add_info = {}
+            camera_all.append(dataset.train[i][2])
             if cfg.DATALOADER.CAMERA_TO_DOMAIN:
                 add_info['domains'] = dataset.train[i][2]
-                camera_all.append(dataset.train[i][2])
             else:
                 add_info['domains'] = int(domain_idx)
 
@@ -106,6 +106,7 @@ def build_reid_train_loader(cfg, class_mode=None):
         train_items.extend(dataset.train)
 
     train_set = CommDataset(train_items, train_transforms, relabel=True)
+    train_set.num_cams = len(set(camera_all)) if camera_all else 0
 
     train_loader = make_sampler(
         train_set=train_set,

@@ -92,7 +92,7 @@ class UrbanElementsReID(ImageDataset):
         dataset = []
 
         for camid, imageName, pid in xml_file:
-            camid = int(camid[1:])
+            camid = int(camid[1:]) - 1
             if pid == -1: continue
             if relabel: pid = pid2label[pid]
             dataset.append((osp.join(dir_path, imageName), pid, camid))
@@ -111,7 +111,7 @@ class UrbanElementsReID(ImageDataset):
         xml_file = self._readCSV_eval_(xml_dir)
         
         for camid, imageName, pid in xml_file:
-            camid = int(camid[1:])
+            camid = int(camid[1:]) - 1
             dataset.append((osp.join(dir_path, imageName), pid, camid))
                 
         return dataset 

@@ -3,9 +3,11 @@ import csv
 import torch
 import torch.nn.functional as F
 import argparse
+import torch.nn as nn
 
 import numpy as np
 from torch.utils.data import DataLoader
+from torchvision import models as tv_models
 from config import cfg
 from model import make_model
 from utils.logger import setup_logger
@@ -316,6 +318,316 @@ def run_split_model(model, cfg, query_records, gallery_records, class_name):
 
     return {record['image_name']: indices[row_idx] + 1 for row_idx, record in enumerate(selected_queries)}
 
+
+# ---------------------------------------------------------------------------
+# faizyab/gradient-reversal: retrieval TTA + traffic-sign classifier soft filter
+# ---------------------------------------------------------------------------
+TRAFFIC_SIGN_CLASS_NAMES = [
+    "Bus_stop",
+    "Not_allowed_double",
+    "Upside_down_triangle",
+    "Stop",
+    "Bump",
+    "Round_about",
+    "Circle_minus",
+    "Crossing",
+    "Parking",
+    "misc_circles",
+    "Rectangle_roadside",
+    "Warning_triangle",
+    "Not_allowed_single",
+    "Arrow_to_side",
+    "Blue_rectangle",
+]
+
+def _checkpoint_to_state_dict(checkpoint):
+    if isinstance(checkpoint, dict):
+        for key in ("state_dict", "model_state_dict", "model", "net", "weights"):
+            candidate = checkpoint.get(key)
+            if isinstance(candidate, dict):
+                return candidate
+        return checkpoint
+    if hasattr(checkpoint, "state_dict"):
+        return checkpoint.state_dict()
+    raise ValueError("Unsupported checkpoint format for traffic sign classifier")
+
+def _strip_state_dict_prefix(state_dict):
+    cleaned = {}
+    for key, value in state_dict.items():
+        clean_key = key
+        for prefix in ("module.", "model.", "net."):
+            if clean_key.startswith(prefix):
+                clean_key = clean_key[len(prefix):]
+        cleaned[clean_key] = value
+    return cleaned
+
+def _resize_batch(img, size):
+    return F.interpolate(img, size=size, mode="bilinear", align_corners=False)
+
+def _cfg_size_list_to_tuples(size_list):
+    return [tuple(int(dim) for dim in size) for size in size_list]
+
+def build_traffic_sign_classifier(cfg):
+    classifier = tv_models.resnet18(weights=None)
+    classifier.fc = nn.Linear(classifier.fc.in_features, len(TRAFFIC_SIGN_CLASS_NAMES))
+
+    weight_path = cfg.TEST.TRAFFIC_SIGN_CLASSIFIER.WEIGHT
+    if not weight_path:
+        raise ValueError("TEST.TRAFFIC_SIGN_CLASSIFIER.WEIGHT must be set when the classifier is enabled")
+
+    checkpoint = torch.load(weight_path, map_location="cpu")
+    state_dict = _strip_state_dict_prefix(_checkpoint_to_state_dict(checkpoint))
+    missing_keys, unexpected_keys = classifier.load_state_dict(state_dict, strict=False)
+    if missing_keys or unexpected_keys:
+        print("Traffic-sign classifier checkpoint loaded with partial key matching")
+        if missing_keys:
+            print("Missing keys:", missing_keys)
+        if unexpected_keys:
+            print("Unexpected keys:", unexpected_keys)
+
+    classifier.cuda()
+    classifier.eval()
+    return classifier
+
+def apply_traffic_sign_soft_filter(dist_mat, query_probs, gallery_probs, mode="softmax",
+                                   alpha=0.35, argmax_penalty=0.75,
+                                   query_mask=None, gallery_mask=None):
+    query_probs = np.asarray(query_probs)
+    gallery_probs = np.asarray(gallery_probs)
+
+    if query_mask is None:
+        query_mask = np.ones(query_probs.shape[0], dtype=bool)
+    else:
+        query_mask = np.asarray(query_mask, dtype=bool)
+
+    if gallery_mask is None:
+        gallery_mask = np.ones(gallery_probs.shape[0], dtype=bool)
+    else:
+        gallery_mask = np.asarray(gallery_mask, dtype=bool)
+
+    pair_mask = query_mask[:, np.newaxis] & gallery_mask[np.newaxis, :]
+    if not np.any(pair_mask):
+        return dist_mat
+
+    if mode == "argmax":
+        query_pred = np.argmax(query_probs, axis=1)[:, np.newaxis]
+        gallery_pred = np.argmax(gallery_probs, axis=1)[np.newaxis, :]
+        mismatch = (query_pred != gallery_pred).astype(np.float32)
+        adjusted = np.copy(dist_mat)
+        adjusted[pair_mask] += argmax_penalty * mismatch[pair_mask]
+        return adjusted
+
+    if mode != "softmax":
+        raise ValueError(f"Unsupported classifier filtering mode: {mode}")
+
+    class_affinity = np.matmul(query_probs, gallery_probs.T)
+    adjusted = np.copy(dist_mat)
+    adjusted[pair_mask] += alpha * (1.0 - class_affinity)[pair_mask]
+    return adjusted
+
+def extract_feature_tta(model, dataloaders, num_query, classifier_model=None,
+                    classifier_temperature=1.0, semantic_classes=None,
+                    retrieval_tta_sizes=None, classifier_input_size=None,
+                    use_tta=False):
+    """Extract features and collect camera IDs for CAJ adjustment."""
+    features = []
+    camids = []
+    img_path = []
+    class_probs = []
+    traffic_mask = []
+    normalized_classes = None
+    if semantic_classes is not None:
+        normalized_classes = [normalize_class_name(cls) for cls in semantic_classes]
+
+    if classifier_input_size is None:
+        classifier_input_size = (224, 224)
+    if retrieval_tta_sizes is None:
+        default_sizes = [
+            (224, 224),
+            (224, 192),
+            (192, 224),
+            (256, 224),
+        ]
+        retrieval_tta_sizes = default_sizes if use_tta else [tuple(cfg.INPUT.SIZE_TEST)]
+
+    sample_offset = 0
+
+    for data in dataloaders:
+        img = data['images']
+        camid = data['camid']
+        batch_paths = data['img_path']
+        n, c, h, w = img.size()
+
+        feature_maps = []
+        for size in retrieval_tta_sizes:
+            flips = [False, True] if use_tta else [False]
+            for flip in flips:
+                if flip:
+                    in_img = torch.flip(img, dims=[-1])
+                else:
+                    in_img = img
+                input_img = _resize_batch(in_img, size).cuda()
+                outputs = model(input_img)
+                f = F.normalize(outputs.float(), dim=1)
+                feature_maps.append(f)
+
+        ff = torch.stack(feature_maps, dim=0).mean(dim=0)
+        ff = F.normalize(ff, dim=1)
+        features.append(ff)
+        camids.extend(np.asarray(camid))
+        img_path.extend(list(batch_paths))
+
+        if normalized_classes is not None:
+            batch_classes = normalized_classes[sample_offset:sample_offset + n]
+            batch_traffic_mask = np.array([cls == "traffic" for cls in batch_classes], dtype=bool)
+        else:
+            batch_traffic_mask = np.ones(n, dtype=bool)
+        traffic_mask.extend(batch_traffic_mask.tolist())
+
+        if classifier_model is not None:
+            batch_probs = torch.zeros((n, len(TRAFFIC_SIGN_CLASS_NAMES)), dtype=torch.float32)
+            if np.any(batch_traffic_mask):
+                traffic_mask_tensor = torch.from_numpy(batch_traffic_mask)
+                traffic_imgs = _resize_batch(img[traffic_mask_tensor], classifier_input_size)
+                cls_logits = classifier_model(traffic_imgs.cuda())
+                if classifier_temperature != 1.0:
+                    cls_logits = cls_logits / float(classifier_temperature)
+                cls_probs = torch.softmax(cls_logits, dim=1).detach().cpu()
+                batch_probs[traffic_mask_tensor] = cls_probs
+            class_probs.append(batch_probs)
+
+        sample_offset += n
+    features = torch.cat(features, 0)
+    camids = np.array(camids)
+    class_probs = torch.cat(class_probs, 0).numpy() if class_probs else None
+    traffic_mask = np.array(traffic_mask, dtype=bool)
+
+    # query
+    qf = features[:num_query]
+    q_camids = camids[:num_query]
+    q_img_paths = img_path[:num_query]
+    q_class_probs = class_probs[:num_query] if class_probs is not None else None
+    q_traffic_mask = traffic_mask[:num_query]
+    # gallery
+    gf = features[num_query:]
+    g_camids = camids[num_query:]
+    g_img_paths = img_path[num_query:]
+    g_class_probs = class_probs[num_query:] if class_probs is not None else None
+    g_traffic_mask = traffic_mask[num_query:]
+    return qf, gf, q_camids, g_camids, q_img_paths, g_img_paths, q_class_probs, g_class_probs, q_traffic_mask, g_traffic_mask
+
+def run_tta_classifier_pipeline(cfg, args, model):
+    """Inference path of faizyab/gradient-reversal (TEST.USE_TTA / TEST.TRAFFIC_SIGN_CLASSIFIER).
+
+    Kept verbatim: resize+flip TTA over TEST.RETRIEVAL_TTA_SIZES with per-view L2 norm,
+    CAJ applied *before* re-ranking, then the traffic-sign classifier soft filter.
+    """
+    traffic_sign_classifier = None
+    if cfg.TEST.TRAFFIC_SIGN_CLASSIFIER.ENABLED or cfg.TEST.TRAFFIC_SIGN_CLASSIFIER.WEIGHT:
+        traffic_sign_classifier = build_traffic_sign_classifier(cfg)
+
+    query_csv_path = os.path.join(cfg.DATASETS.ROOT_DIR, "query_classes.csv")
+    gallery_csv_path = os.path.join(cfg.DATASETS.ROOT_DIR, "test_classes.csv")
+    need_classes = (
+        cfg.TEST.DO_CLASS_FILTER
+        or cfg.TEST.DO_CLASS_BASED_RERANKING
+        or cfg.TEST.TRAFFIC_SIGN_CLASSIFIER.ENABLED
+        or cfg.TEST.TRAFFIC_SIGN_CLASSIFIER.WEIGHT
+    )
+    query_classes = gallery_classes = None
+    if need_classes:
+        query_classes = read_classes_from_csv(query_csv_path)
+        gallery_classes = read_classes_from_csv(gallery_csv_path)
+
+    for testname in cfg.DATASETS.TEST:
+        val_loader, num_query = build_reid_test_loader(cfg, testname)
+        if cfg.MODEL.NAME == 'part_attention_vit':
+            do_inf_pat(cfg, model, val_loader, num_query)
+        else:
+            do_inf(cfg, model, val_loader, num_query)
+    with torch.no_grad():
+        qf, gf, q_camids, g_camids, q_img_paths, g_img_paths, q_class_probs, g_class_probs, q_traffic_mask, g_traffic_mask = extract_feature_tta(
+            model,
+            val_loader,
+            num_query,
+            classifier_model=traffic_sign_classifier,
+            classifier_temperature=cfg.TEST.TRAFFIC_SIGN_CLASSIFIER.TEMPERATURE,
+            semantic_classes=(query_classes + gallery_classes) if query_classes is not None and gallery_classes is not None else None,
+            retrieval_tta_sizes=_cfg_size_list_to_tuples(cfg.TEST.RETRIEVAL_TTA_SIZES),
+            classifier_input_size=tuple(cfg.TEST.TRAFFIC_SIGN_CLASSIFIER.INPUT_SIZE),
+            use_tta=getattr(cfg.TEST, 'USE_TTA', False),
+        )
+
+    # save feature
+    qf=qf.cpu().numpy()
+    gf=gf.cpu().numpy()
+    np.save("./qf.npy", qf)
+    np.save("./gf.npy", gf)
+
+    q_g_dist = np.dot(qf, np.transpose(gf))
+    q_q_dist = np.dot(qf, np.transpose(qf))
+    g_g_dist = np.dot(gf, np.transpose(gf))
+
+    # Apply Camera-Aware Jaccard adjustment first if enabled (influence reranking topology)
+    if cfg.TEST.DO_CAJ_ADJUSTMENT:
+        q_g_dist, q_q_dist, g_g_dist = apply_caj(
+            q_g_dist,
+            q_q_dist,
+            g_g_dist,
+            q_camids,
+            g_camids,
+            same_cam_penalty=cfg.TEST.CAJ_SAME_CAM_PENALTY,
+            cross_cam_scale=cfg.TEST.CAJ_CROSS_CAM_SCALE,
+        )
+
+    if cfg.TEST.DO_CLASS_BASED_RERANKING:
+        re_rank_dist = apply_class_based_reranking(
+            q_g_dist,
+            q_q_dist,
+            g_g_dist,
+            query_classes,
+            gallery_classes,
+            cfg.TEST.CLASS_BASED_RERANKING_PARAMS,
+        )
+    else:
+        re_rank_dist = re_ranking(q_g_dist, q_q_dist, g_g_dist)
+
+    if (cfg.TEST.TRAFFIC_SIGN_CLASSIFIER.ENABLED or cfg.TEST.TRAFFIC_SIGN_CLASSIFIER.WEIGHT) and q_class_probs is not None and g_class_probs is not None:
+        re_rank_dist = apply_traffic_sign_soft_filter(
+            re_rank_dist,
+            q_class_probs,
+            g_class_probs,
+            mode=cfg.TEST.TRAFFIC_SIGN_CLASSIFIER.MODE,
+            alpha=cfg.TEST.TRAFFIC_SIGN_CLASSIFIER.ALPHA,
+            argmax_penalty=cfg.TEST.TRAFFIC_SIGN_CLASSIFIER.ARGMAX_PENALTY,
+            query_mask=q_traffic_mask,
+            gallery_mask=g_traffic_mask,
+        )
+
+    if cfg.TEST.DO_CLASS_FILTER:
+        re_rank_dist = apply_class_penalty(re_rank_dist, query_classes, gallery_classes)
+
+    indices = np.argsort(re_rank_dist, axis=1)[:, :100]
+
+    m, n = indices.shape
+    # # print('m: {}  n: {}'.format(m, n))
+    with open(args.track, 'wb') as f_w:
+        for i in range(m):
+            write_line = indices[i] + 1
+            write_line = ' '.join(map(str, write_line.tolist())) + '\n'
+            f_w.write(write_line.encode())
+
+
+    lista_nombres = [os.path.basename(path) for path in q_img_paths]
+    output_path = args.track.split(".txt")[0] + "_submission.csv"
+
+    with open(output_path, 'w', newline='') as archivo_csv:
+        csv_writter = csv.writer(archivo_csv)
+        csv_writter.writerow(['imageName', 'Corresponding Indexes'])
+        for numero, track in zip(lista_nombres, indices):
+            track_str = ' '.join(map(str, track + 1))
+            csv_writter.writerow([numero, track_str])
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="ReID Training")
     parser.add_argument(
@@ -394,6 +706,10 @@ if __name__ == "__main__":
                 if track is None:
                     continue
                 csv_writter.writerow([image_name, ' '.join(map(str, track.tolist()))])
+    elif cfg.TEST.USE_TTA or cfg.TEST.TRAFFIC_SIGN_CLASSIFIER.ENABLED or cfg.TEST.TRAFFIC_SIGN_CLASSIFIER.WEIGHT:
+        model = make_model(cfg, cfg.MODEL.NAME, 0,0,0)
+        model.load_param(cfg.TEST.WEIGHT)
+        run_tta_classifier_pipeline(cfg, args, model)
     else:
         model = make_model(cfg, cfg.MODEL.NAME, 0,0,0)
         model.load_param(cfg.TEST.WEIGHT)

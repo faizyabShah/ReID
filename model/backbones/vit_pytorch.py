@@ -334,7 +334,9 @@ class HybridEmbed(nn.Module):
         x = self.backbone(x)
         if isinstance(x, (list, tuple)):
             x = x[-1]  # last feature if backbone outputs list/tuple of features
-        x = self.proj(x).flatten(2).transpose(1, 2)
+        x = self.proj(x)
+        self.grid_size = (x.shape[-2], x.shape[-1])
+        x = x.flatten(2).transpose(1, 2)
         return x
 
 class PatchEmbed_overlap(nn.Module):
@@ -367,11 +369,8 @@ class PatchEmbed_overlap(nn.Module):
 
     def forward(self, x):
         B, C, H, W = x.shape
-
-        # FIXME look at relaxing size constraints
-        assert H == self.img_size[0] and W == self.img_size[1], \
-            f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
         x = self.proj(x)
+        self.grid_size = (x.shape[-2], x.shape[-1])
 
         x = x.flatten(2).transpose(1, 2) # [64, 8, 768]
         return x
@@ -431,6 +430,7 @@ class PatchEmbed_conv_stem(nn.Module):
         if self.stem_conv:
             x = self.conv(x)
         x = self.proj(x)
+        self.grid_size = (x.shape[-2], x.shape[-1])
         x = x.flatten(2).transpose(1, 2) # [64, 8, 768]
         return x
 
@@ -496,6 +496,12 @@ class TransReID(nn.Module):
     def no_weight_decay(self):
         return {'pos_embed', 'cls_token'}
 
+    def _get_pos_embed(self, patch_tokens):
+        grid_size = getattr(self.patch_embed, 'grid_size', None)
+        if grid_size is None or patch_tokens.shape[1] + 1 == self.pos_embed.shape[1]:
+            return self.pos_embed
+        return resize_pos_embed_runtime(self.pos_embed, grid_size, num_extra_tokens=1)
+
     def get_classifier(self):
         return self.head
 
@@ -510,7 +516,7 @@ class TransReID(nn.Module):
         cls_tokens = self.cls_token.expand(B, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
         x = torch.cat((cls_tokens, x), dim=1)
 
-        x = x + self.pos_embed
+        x = x + self._get_pos_embed(x[:, 1:])
 
         x = self.pos_drop(x)
         if return_layerwise:
@@ -654,6 +660,12 @@ class part_Attention_ViT(nn.Module):
     def no_weight_decay(self):
         return {'pos_embed', 'cls_token', 'part_token1', 'part_token2', 'part_token3'}
 
+    def _get_pos_embed(self, patch_tokens):
+        grid_size = getattr(self.patch_embed, 'grid_size', None)
+        if grid_size is None or patch_tokens.shape[1] + 4 == self.pos_embed.shape[1]:
+            return self.pos_embed
+        return resize_pos_embed_runtime(self.pos_embed, grid_size, num_extra_tokens=4)
+
     def get_classifier(self):
         return self.head
 
@@ -671,16 +683,22 @@ class part_Attention_ViT(nn.Module):
         part_token3 = self.part_token3.expand(B, -1, -1)
         x = torch.cat((cls_tokens, part_token1, part_token2, part_token3, x), dim=1)
 
-        x = x + self.pos_embed
+        x = x + self._get_pos_embed(x[:, 4:])
 
         x = self.pos_drop(x)
         layerwise_tokens = []
 
-        mask = torch.ones([B, 1, self.num_patches, self.num_patches], device=x.device.type)
+        current_num_patches = x.shape[1]
+        grid_size = getattr(self.patch_embed, 'grid_size', None)
+        if grid_size is None:
+            grid_h, grid_w = self.patch_embed.num_y, self.patch_embed.num_x
+        else:
+            grid_h, grid_w = grid_size
+        mask = torch.ones([B, 1, current_num_patches, current_num_patches], device=x.device.type)
         # if self.training:
             # mask[:, 0] = self.mask
         # for i in range(B):
-        mask[:, 0] = self.attn_mask_generate(self.num_patches, self.patch_embed.num_y, self.patch_embed.num_x, x.device.type)
+        mask[:, 0] = self.attn_mask_generate(current_num_patches, grid_h, grid_w, x.device.type)
         for blk in self.blocks:
             x = blk(x, mask)
             layerwise_tokens.append(x)
@@ -774,6 +792,34 @@ def resize_pos_embed_part_vit(posemb, posemb_new, hight, width):
     posemb_grid = posemb_grid.permute(0, 2, 3, 1).reshape(1, hight * width, -1)
     posemb = torch.cat([posemb_token, posemb_token, posemb_token, posemb_token, posemb_grid], dim=1)
     return posemb
+
+def resize_pos_embed_runtime(posemb, grid_size, num_extra_tokens=1):
+    """Resize positional embeddings for the current input grid during inference."""
+    extra_tokens = posemb[:, :num_extra_tokens]
+    posemb_grid = posemb[:, num_extra_tokens:]
+    # Try to infer the old grid shape. Old checkpoints may have non-square grids
+    # (e.g. 15x16 => 240 tokens). Prefer a square root, otherwise find a factor
+    # pair (h, w) such that h*w == num_tokens. Choose the pair with h <= w.
+    num_grid_tokens = posemb_grid.shape[1]
+    gs_old_h = int(math.sqrt(num_grid_tokens))
+    gs_old_w = gs_old_h
+    if gs_old_h * gs_old_w != num_grid_tokens:
+        # find factor pair by searching downwards from sqrt
+        found = False
+        for h in range(gs_old_h, 0, -1):
+            if num_grid_tokens % h == 0:
+                gs_old_h = h
+                gs_old_w = num_grid_tokens // h
+                found = True
+                break
+        if not found:
+            # fallback: treat as single row
+            gs_old_h, gs_old_w = 1, num_grid_tokens
+
+    posemb_grid = posemb_grid.reshape(1, gs_old_h, gs_old_w, -1).permute(0, 3, 1, 2)
+    posemb_grid = F.interpolate(posemb_grid, size=grid_size, mode='bilinear', align_corners=False)
+    posemb_grid = posemb_grid.permute(0, 2, 3, 1).reshape(1, grid_size[0] * grid_size[1], -1)
+    return torch.cat([extra_tokens, posemb_grid], dim=1)
 
 def part_attention_vit_large(img_size=(256, 128), stride_size=16, drop_rate=0.0, attn_drop_rate=0.0, drop_path_rate=0.1, **kwargs):
     model = part_Attention_ViT(
