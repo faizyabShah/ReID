@@ -128,6 +128,8 @@ _C.INPUT.STOCHASTIC_AUG.ENABLED = False
 _C.INPUT.STOCHASTIC_AUG.PROB_NONE = 0.15
 _C.INPUT.STOCHASTIC_AUG.PROB_ONE = 0.45
 _C.INPUT.STOCHASTIC_AUG.PROB_TWO = 0.40
+# Class-specific augmentation
+_C.INPUT.ENABLE_CLASS_SPECIFIC_AUG = False  # faizyab/class-specific-augmentations (branch default: True)
 
 # -----------------------------------------------------------------------------
 # Dataset

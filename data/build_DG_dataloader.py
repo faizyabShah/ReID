@@ -16,7 +16,7 @@ from utils.class_split import attach_class_info, normalize_class_name, read_clas
 from . import samplers
 from .common import CommDataset
 from .datasets import DATASET_REGISTRY
-from .transforms import build_transforms
+from .transforms import build_transforms, build_class_specific_transforms
 
 _root = os.getenv("REID_DATASETS", "../../data")
 
@@ -53,7 +53,13 @@ def build_reid_train_loader(cfg, class_mode=None):
     else:
         num_workers = cfg.DATALOADER.NUM_WORKERS
 
-    train_transforms = build_transforms(cfg, is_train=True, is_fake=False)
+    # Use class-specific transforms if available
+    enable_class_specific = cfg.INPUT.get('ENABLE_CLASS_SPECIFIC_AUG', True) if hasattr(cfg.INPUT, 'get') else True
+    if enable_class_specific:
+        train_transforms = build_class_specific_transforms(cfg, is_train=True, is_fake=False, enable_class_specific=True)
+    else:
+        train_transforms = build_transforms(cfg, is_train=True, is_fake=False)
+    
     train_items = list()
     domain_idx = 0
     camera_all = list()
