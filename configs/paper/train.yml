@@ -1,0 +1,74 @@
+# Paper method, training (Sec. 2): PAT ViT-L/16 on Urban2026 + UrbAM-ReID,
+# stochastic augmentation (0/1/2 ops, p = 0.15/0.45/0.40) + CJ + RPT (p = 0.3), LGT and REA off,
+# AdamW 5e-4, 320x192, batch 64. Source: narmyn/stochasticaugmentation.
+
+MODEL:
+  PRETRAIN_CHOICE: 'imagenet'
+  PRETRAIN_PATH: './pretrained/'  # folder containing jx_vit_large_p16_224-4ee7a4dc.pth
+  IF_LABELSMOOTH: 'on'
+  IF_WITH_CENTER: 'no'
+  NAME: 'part_attention_vit'
+  NO_MARGIN: True
+  DEVICE_ID: ('0')
+  TRANSFORMER_TYPE: 'vit_large_patch16_224_TransReID'
+  STRIDE_SIZE: [16, 16]
+
+INPUT:
+  SIZE_TRAIN: [320, 192]
+  SIZE_TEST: [320, 192]
+  REA:
+    ENABLED: False
+  PIXEL_MEAN: [0.5, 0.5, 0.5]
+  PIXEL_STD: [0.5, 0.5, 0.5]
+  LGT: # Local Grayscale Transfomation
+    DO_LGT: False
+    PROB: 0.5
+  CJ:
+    ENABLED: True
+    PROB: 0.5
+    BRIGHTNESS: 0.3
+    CONTRAST: 0.3
+    SATURATION: 0.2
+    HUE: 0.1
+  RPT:
+    ENABLED: True
+    PROB: 0.3
+  STOCHASTIC_AUG:
+    ENABLED: True
+
+DATASETS:
+  TRAIN: ('UrbanElementsReID',)
+  TEST: ('UrbanElementsReID',)
+  ROOT_DIR: './Urban2026_UAM_MERGED'  # Urban2026 + UrbAM-ReID (tools/merge.py)
+
+DATALOADER:
+  SAMPLER: 'softmax_triplet'
+  NUM_INSTANCE: 4
+  NUM_WORKERS: 8
+
+SOLVER:
+  OPTIMIZER_NAME: 'AdamW'
+  MAX_EPOCHS: 60
+  BASE_LR: 0.0005 # 0.0004 for msmt
+  IMS_PER_BATCH: 64
+  WARMUP_METHOD: 'linear'
+  LARGE_FC_LR: False
+  CHECKPOINT_PERIOD: 2
+  LOG_PERIOD: 60
+  EVAL_PERIOD: 1
+  WEIGHT_DECAY:  1e-4
+  WEIGHT_DECAY_BIAS: 1e-4
+  BIAS_LR_FACTOR: 2
+  SEED: 1234
+
+TEST:
+  EVAL: True
+  IMS_PER_BATCH: 128
+  RE_RANKING: False
+  WEIGHT: ''
+  NECK_FEAT: 'before'
+  FEAT_NORM: True
+
+LOG_ROOT: 'models/' # root of log file
+TB_LOG_ROOT: './tb_log/'
+LOG_NAME: 'paper'

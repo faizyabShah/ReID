@@ -1,0 +1,91 @@
+# Camera feature normalisation, mAP .118 (narmyn/moreposthocthings).
+# Negative result (Table 1); paper inference config plus one change.
+
+MODEL:
+  PRETRAIN_CHOICE: 'imagenet'
+  PRETRAIN_PATH: './pretrained/'
+  METRIC_LOSS_TYPE: 'triplet'
+  IF_LABELSMOOTH: 'on'
+  IF_WITH_CENTER: 'no'
+  NAME: 'part_attention_vit'
+  NO_MARGIN: True
+  DEVICE_ID: ('0')
+  TRANSFORMER_TYPE: 'vit_large_patch16_224_TransReID'
+  STRIDE_SIZE: [16, 16]
+
+INPUT:
+  SIZE_TRAIN: [320, 192]
+  SIZE_TEST: [320, 192]
+  REA:
+    ENABLED: False
+  PIXEL_MEAN: [0.5, 0.5, 0.5]
+  PIXEL_STD: [0.5, 0.5, 0.5]
+  LGT: # Local Grayscale Transfomation
+    DO_LGT: True
+    PROB: 0.5
+
+DATASETS:
+  TRAIN: ('UrbanElementsReID',)
+  TEST: ('UrbanElementsReID_test',)
+  ROOT_DIR: './Urban2026'
+
+DATALOADER:
+  SAMPLER: 'softmax_triplet'
+  NUM_INSTANCE: 4
+  NUM_WORKERS: 8
+
+SOLVER:
+  OPTIMIZER_NAME: 'SGD'
+  MAX_EPOCHS: 10
+  BASE_LR: 0.001 # 0.0004 for msmt
+  IMS_PER_BATCH: 64
+  WARMUP_METHOD: 'linear'
+  LARGE_FC_LR: False
+  CHECKPOINT_PERIOD: 5
+  LOG_PERIOD: 60
+  EVAL_PERIOD: 1
+  WEIGHT_DECAY:  1e-4
+  WEIGHT_DECAY_BIAS: 1e-4
+  BIAS_LR_FACTOR: 2
+  SEED: 1234
+
+TEST:
+  CAM_FEAT_NORM: True
+  EVAL: True
+  IMS_PER_BATCH: 128
+  RE_RANKING: False
+  WEIGHT: './models/paper/part_attention_vit_60.pth'  # checkpoint produced by configs/paper/train.yml
+  NECK_FEAT: 'before'
+  FEAT_NORM: True
+  CLS_FUSION: True
+  CLS_FUSION_LAST: 8
+  USE_PART_TOKENS: True  # Eq. (1): CLS of the last 8 layers + 3 part tokens of the final layer
+  PART_TOKENS_LAST: 1
+  DO_CLASS_FILTER: True
+  DO_CAJ_ADJUSTMENT: True
+  DO_CLASS_BASED_RERANKING: True
+  CLASS_BASED_RERANKING_PARAMS:
+    DEFAULT:
+      K1: 20
+      K2: 6
+      LAMBDA: 0.3
+    container:
+      K1: 18
+      K2: 6
+      LAMBDA: 0.30
+    crosswalk:
+      K1: 24
+      K2: 6
+      LAMBDA: 0.35
+    rubbishbins:
+      K1: 16
+      K2: 4
+      LAMBDA: 0.28
+    traffic:
+      K1: 14
+      K2: 4
+      LAMBDA: 0.25
+
+LOG_ROOT: 'models/' # root of log file
+TB_LOG_ROOT: './tb_log/'
+LOG_NAME: 'paper_test'

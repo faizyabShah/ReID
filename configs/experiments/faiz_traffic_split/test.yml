@@ -1,7 +1,10 @@
+# Dual-model inference: traffic-sign queries use the traffic model, others the non-traffic model.
+# This path uses plain k-reciprocal re-ranking only (no class re-ranking / CAJ / class filter).
+# Runnable on main: paper config + this experiment's flags; the branch files are in original/.
+
 MODEL:
   PRETRAIN_CHOICE: 'imagenet'
-  #PRETRAIN_PATH: "../../.cache/torch/hub/checkpoints" # root of pretrain path
-  PRETRAIN_PATH: "/media/DiscoLocal/IPCV/Urban_ReID/ReID_PostHoc_Faiz/ReID" # 
+  PRETRAIN_PATH: './pretrained/'
   METRIC_LOSS_TYPE: 'triplet'
   IF_LABELSMOOTH: 'on'
   IF_WITH_CENTER: 'no'
@@ -12,21 +15,20 @@ MODEL:
   STRIDE_SIZE: [16, 16]
 
 INPUT:
-  SIZE_TRAIN: [224,224]
-  SIZE_TEST: [224,224]
+  SIZE_TRAIN: [320, 192]
+  SIZE_TEST: [320, 192]
   REA:
-    ENABLED: True
+    ENABLED: False
   PIXEL_MEAN: [0.5, 0.5, 0.5]
   PIXEL_STD: [0.5, 0.5, 0.5]
   LGT: # Local Grayscale Transfomation
-    DO_LGT: False
+    DO_LGT: True
     PROB: 0.5
 
 DATASETS:
   TRAIN: ('UrbanElementsReID',)
   TEST: ('UrbanElementsReID_test',)
-  #ROOT_DIR: ('../../data') # root of datasets
-  ROOT_DIR: '/media/DiscoLocal/IPCV/Urban_ReID/ReID_PostHoc_Faiz/ReID/Urban2026'
+  ROOT_DIR: './Urban2026'
 
 DATALOADER:
   SAMPLER: 'softmax_triplet'
@@ -49,14 +51,18 @@ SOLVER:
   SEED: 1234
 
 TEST:
+  TRAFFIC_WEIGHT: './models/faiz_traffic_split_traffic/part_attention_vit_60.pth'
+  OTHER_WEIGHT: './models/faiz_traffic_split_non_traffic/part_attention_vit_60.pth'
   EVAL: True
   IMS_PER_BATCH: 128
   RE_RANKING: False
-  WEIGHT: "./models/model/part_attention_vit_25.pth" #test 
+  WEIGHT: './models/paper/part_attention_vit_60.pth'  # checkpoint produced by configs/paper/train.yml
   NECK_FEAT: 'before'
   FEAT_NORM: True
   CLS_FUSION: True
   CLS_FUSION_LAST: 8
+  USE_PART_TOKENS: True  # Eq. (1): CLS of the last 8 layers + 3 part tokens of the final layer
+  PART_TOKENS_LAST: 1
   DO_CLASS_FILTER: True
   DO_CAJ_ADJUSTMENT: True
   DO_CLASS_BASED_RERANKING: True
@@ -84,4 +90,4 @@ TEST:
 
 LOG_ROOT: 'models/' # root of log file
 TB_LOG_ROOT: './tb_log/'
-LOG_NAME: './model'
+LOG_NAME: 'faiz_traffic_split_test'

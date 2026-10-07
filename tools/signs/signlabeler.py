@@ -574,8 +574,8 @@ def build_prototypes(csv_path, image_dir, reid_checkpoint, reid_backbone,
     print(f"Front-view signs for prototypes: {len(front_signs)}")
 
     if config_file is None:
-        default_cfg = os.path.join(os.path.dirname(__file__), "config",
-                                   "UrbanElementsReID_test.yml")
+        default_cfg = os.path.join(os.path.dirname(__file__), "..", "..", "configs", "paper",
+                                   "test.yml")
         config_file = default_cfg if os.path.exists(default_cfg) else None
     cls_fusion, cls_fusion_last = _read_cls_fusion_config(config_file)
     if cls_fusion:

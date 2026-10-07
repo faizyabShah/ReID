@@ -853,12 +853,12 @@ def run_tta_classifier_pipeline(cfg, args, model):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="ReID Training")
     parser.add_argument(
-        "--config_file", default="./config/PAT.yml", help="path to config file", type=str
+        "--config_file", default="./configs/paper/test.yml", help="path to config file", type=str
     )
     parser.add_argument("opts", help="Modify config options using the command-line", default=None,
                         nargs=argparse.REMAINDER)
     parser.add_argument(
-        "--track", default="./config/PAT.yml", help="path to config file", type=str
+        "--track", default="./outputs/track.txt", help="ranking output; also writes <track>_submission.csv", type=str
     )
     parser.add_argument(
         "--traffic_weight", default="", help="path to traffic model weights", type=str
@@ -898,6 +898,7 @@ if __name__ == "__main__":
     logger.info("Running with config:\n{}".format(cfg))
 
     os.environ['CUDA_VISIBLE_DEVICES'] = cfg.MODEL.DEVICE_ID
+    os.makedirs(os.path.dirname(os.path.abspath(args.track)), exist_ok=True)
 
     traffic_weight = args.traffic_weight or cfg.TEST.TRAFFIC_WEIGHT
     other_weight = args.other_weight or cfg.TEST.OTHER_WEIGHT

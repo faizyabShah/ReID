@@ -91,7 +91,7 @@ def run_single_training(cfg, class_mode, local_rank):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="ReID Training")
     parser.add_argument(
-        "--config_file", default="./config/PAT.yml", help="path to config file", type=str
+        "--config_file", default="./configs/paper/train.yml", help="path to config file", type=str
     )
 
     parser.add_argument("opts", help="Modify config options using the command-line", default=None,

@@ -451,7 +451,7 @@ def save_submission_csv(output_path, rows):
 
 def main():
     parser = argparse.ArgumentParser(description="UAM Unified grid-search evaluation")
-    parser.add_argument("--config_file", default="./config/PAT.yml", type=str)
+    parser.add_argument("--config_file", default="./configs/paper/test.yml", type=str)
     parser.add_argument("--data_root", default="./UAM_Unified", type=str)
     parser.add_argument("--output", default="./uam_gridsearch_submission.csv", type=str)
     parser.add_argument("--summary", default="./uam_gridsearch_best.json", type=str)

@@ -1,6 +1,6 @@
 import numpy as np
 from utils.re_ranking import re_ranking
-from evaluate_csv import evaluate_from_indices
+from tools.evaluate_csv import evaluate_from_indices
 import csv
 
 # ---------------- CONFIG ----------------

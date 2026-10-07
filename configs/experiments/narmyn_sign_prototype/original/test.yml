@@ -1,7 +1,7 @@
 MODEL:
   PRETRAIN_CHOICE: 'imagenet'
   #PRETRAIN_PATH: "../../.cache/torch/hub/checkpoints" # root of pretrain path
-  PRETRAIN_PATH: "/media/DiscoLocal/IPCV/Urban_ReID/ReID_PostHoc_Faiz/ReID" # 
+  PRETRAIN_PATH: "/media/DiscoLocal/IPCV/Urban_ReID/ReID_Prototype/ReID" # 
   METRIC_LOSS_TYPE: 'triplet'
   IF_LABELSMOOTH: 'on'
   IF_WITH_CENTER: 'no'
@@ -12,8 +12,8 @@ MODEL:
   STRIDE_SIZE: [16, 16]
 
 INPUT:
-  SIZE_TRAIN: [320, 192]
-  SIZE_TEST: [320, 192]
+  SIZE_TRAIN: [256,128]
+  SIZE_TEST: [256,128]
   REA:
     ENABLED: False
   PIXEL_MEAN: [0.5, 0.5, 0.5]
@@ -26,7 +26,7 @@ DATASETS:
   TRAIN: ('UrbanElementsReID',)
   TEST: ('UrbanElementsReID_test',)
   #ROOT_DIR: ('../../data') # root of datasets
-  ROOT_DIR: '/media/DiscoLocal/IPCV/Urban_ReID/ReID_PostHoc_Faiz/ReID/Urban2026'
+  ROOT_DIR: '/media/DiscoLocal/IPCV/Urban_ReID/ReID_Prototype/ReID/Urban2026'
 
 DATALOADER:
   SAMPLER: 'softmax_triplet'
@@ -56,7 +56,7 @@ TEST:
   NECK_FEAT: 'before'
   FEAT_NORM: True
   CLS_FUSION: True
-  CLS_FUSION_LAST: 8
+  CLS_FUSION_LAST: 6
   DO_CLASS_FILTER: True
   DO_CAJ_ADJUSTMENT: True
   DO_CLASS_BASED_RERANKING: True
@@ -66,21 +66,21 @@ TEST:
       K2: 6
       LAMBDA: 0.3
     container:
-      K1: 18
-      K2: 6
-      LAMBDA: 0.30
+      K1: 24
+      K2: 4
+      LAMBDA: 0.35
     crosswalk:
       K1: 24
-      K2: 6
+      K2: 4
       LAMBDA: 0.35
     rubbishbins:
-      K1: 16
+      K1: 24
       K2: 4
-      LAMBDA: 0.28
+      LAMBDA: 0.3
     traffic:
-      K1: 14
+      K1: 20
       K2: 4
-      LAMBDA: 0.25
+      LAMBDA: 0.35
 
 LOG_ROOT: 'models/' # root of log file
 TB_LOG_ROOT: './tb_log/'

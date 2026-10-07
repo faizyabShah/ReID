@@ -1,7 +1,10 @@
+# Class-wise PAT part masks: vertical part bands for crosswalks (narmyn/trainingvitlarge64).
+# Runnable on main: paper config + this experiment's flags; the branch files are in original/.
+
 MODEL:
-  PRETRAIN_CHOICE: 'self'
-  #PRETRAIN_PATH: "../../.cache/torch/hub/checkpoints" # root of pretrain path
-  PRETRAIN_PATH: "/home/sidna/ReID_Project/ReID_vitlarge64/models/model/" 
+  CLASSWISE_PART_MASK: True
+  PRETRAIN_CHOICE: 'imagenet'
+  PRETRAIN_PATH: './pretrained/'  # folder containing jx_vit_large_p16_224-4ee7a4dc.pth
   IF_LABELSMOOTH: 'on'
   IF_WITH_CENTER: 'no'
   NAME: 'part_attention_vit'
@@ -11,8 +14,8 @@ MODEL:
   STRIDE_SIZE: [16, 16]
 
 INPUT:
-  SIZE_TRAIN: [256,128]
-  SIZE_TEST: [256,128]
+  SIZE_TRAIN: [320, 192]
+  SIZE_TEST: [320, 192]
   REA:
     ENABLED: False
   PIXEL_MEAN: [0.5, 0.5, 0.5]
@@ -27,21 +30,16 @@ INPUT:
     CONTRAST: 0.3
     SATURATION: 0.2
     HUE: 0.1
-  REA:
-    ENABLED: False
-    PROB: 0.5
   RPT:
     ENABLED: True
     PROB: 0.3
-
-
-
+  STOCHASTIC_AUG:
+    ENABLED: True
 
 DATASETS:
   TRAIN: ('UrbanElementsReID',)
   TEST: ('UrbanElementsReID',)
-  #ROOT_DIR: ('../../data') # root of datasets
-  ROOT_DIR: '/home/sidna/ReID_Project/ReID_vitlarge64/Urban2026_UAM_MERGED'
+  ROOT_DIR: './Urban2026_UAM_MERGED'  # Urban2026 + UrbAM-ReID (tools/merge.py)
 
 DATALOADER:
   SAMPLER: 'softmax_triplet'
@@ -49,13 +47,13 @@ DATALOADER:
   NUM_WORKERS: 8
 
 SOLVER:
-  OPTIMIZER_NAME: 'SGD'
+  OPTIMIZER_NAME: 'AdamW'
   MAX_EPOCHS: 60
-  BASE_LR: 0.001 # 0.0004 for msmt
+  BASE_LR: 0.0005 # 0.0004 for msmt
   IMS_PER_BATCH: 64
   WARMUP_METHOD: 'linear'
   LARGE_FC_LR: False
-  CHECKPOINT_PERIOD: 5
+  CHECKPOINT_PERIOD: 2
   LOG_PERIOD: 60
   EVAL_PERIOD: 1
   WEIGHT_DECAY:  1e-4
@@ -73,4 +71,4 @@ TEST:
 
 LOG_ROOT: 'models/' # root of log file
 TB_LOG_ROOT: './tb_log/'
-LOG_NAME: './model_new'
+LOG_NAME: 'narmyn_classwise_part_masks'

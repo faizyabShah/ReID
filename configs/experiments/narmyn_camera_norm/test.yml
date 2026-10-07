@@ -1,7 +1,9 @@
+# Per-camera feature normalisation + x1.1 resample TTA (narmyn/moreposthocthings); paper: camera norm .118.
+# Runnable on main: paper config + this experiment's flags; the branch files are in original/.
+
 MODEL:
   PRETRAIN_CHOICE: 'imagenet'
-  #PRETRAIN_PATH: "../../.cache/torch/hub/checkpoints" # root of pretrain path
-  PRETRAIN_PATH: "/media/DiscoLocal/IPCV/Urban_ReID/ReID_PostHoc_Faiz/ReID" # 
+  PRETRAIN_PATH: './pretrained/'
   METRIC_LOSS_TYPE: 'triplet'
   IF_LABELSMOOTH: 'on'
   IF_WITH_CENTER: 'no'
@@ -12,8 +14,8 @@ MODEL:
   STRIDE_SIZE: [16, 16]
 
 INPUT:
-  SIZE_TRAIN: [256,128]
-  SIZE_TEST: [256,128]
+  SIZE_TRAIN: [320, 192]
+  SIZE_TEST: [320, 192]
   REA:
     ENABLED: False
   PIXEL_MEAN: [0.5, 0.5, 0.5]
@@ -25,8 +27,7 @@ INPUT:
 DATASETS:
   TRAIN: ('UrbanElementsReID',)
   TEST: ('UrbanElementsReID_test',)
-  #ROOT_DIR: ('../../data') # root of datasets
-  ROOT_DIR: '/media/DiscoLocal/IPCV/Urban_ReID/ReID_PostHoc_Faiz/ReID/Urban2026'
+  ROOT_DIR: './Urban2026'
 
 DATALOADER:
   SAMPLER: 'softmax_triplet'
@@ -49,39 +50,43 @@ SOLVER:
   SEED: 1234
 
 TEST:
+  CAM_FEAT_NORM: True
+  RESAMPLE_TTA: True
   EVAL: True
   IMS_PER_BATCH: 128
   RE_RANKING: False
-  WEIGHT: "./models/model/part_attention_vit_25.pth" #test 
+  WEIGHT: './models/paper/part_attention_vit_60.pth'  # checkpoint produced by configs/paper/train.yml
   NECK_FEAT: 'before'
   FEAT_NORM: True
   CLS_FUSION: True
-  CLS_FUSION_LAST: 2
+  CLS_FUSION_LAST: 8
+  USE_PART_TOKENS: True  # Eq. (1): CLS of the last 8 layers + 3 part tokens of the final layer
+  PART_TOKENS_LAST: 1
   DO_CLASS_FILTER: True
   DO_CAJ_ADJUSTMENT: True
   DO_CLASS_BASED_RERANKING: True
   CLASS_BASED_RERANKING_PARAMS:
     DEFAULT:
       K1: 20
-      K2: 4
-      LAMBDA: 0.35
+      K2: 6
+      LAMBDA: 0.3
     container:
-      K1: 20
-      K2: 2
-      LAMBDA: 0.5
+      K1: 18
+      K2: 6
+      LAMBDA: 0.30
     crosswalk:
-      K1: 28
-      K2: 4
+      K1: 24
+      K2: 6
       LAMBDA: 0.35
     rubbishbins:
-      K1: 20
+      K1: 16
       K2: 4
-      LAMBDA: 0.3
+      LAMBDA: 0.28
     traffic:
       K1: 14
       K2: 4
-      LAMBDA: 0.35
+      LAMBDA: 0.25
 
 LOG_ROOT: 'models/' # root of log file
 TB_LOG_ROOT: './tb_log/'
-LOG_NAME: './model'
+LOG_NAME: 'narmyn_camera_norm_test'

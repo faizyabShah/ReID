@@ -4,7 +4,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_ROOT"
 
-CONFIG_PATH="config/UrbanElementsReID_train.yml"
+CONFIG_PATH="configs/experiments/faiz_augmentation_gridsearch/train.yml"
 
 # ✅ Now using WORKING directory (writeable)
 CKPT_PATH="/kaggle/working/ReID_dataset"
