@@ -35,6 +35,7 @@ class UrbanElementsReID(ImageDataset):
         self.train = train
         self.query = query
         self.gallery = gallery
+        self.train_class_map = self._build_class_map()
 
         super(UrbanElementsReID, self).__init__(self.train , self.query, self.gallery, **kwargs)
 
@@ -78,6 +79,17 @@ class UrbanElementsReID(ImageDataset):
         
         return list(zip(camids, imageNames, pids))
     
+    def _build_class_map(self):
+        csv_dir = osp.join(self.dataset_dir, 'train_classes.csv')
+        class_map = {}
+        with open(csv_dir, newline='') as csvfile:
+            reader = csv.reader(csvfile, delimiter=',')
+            next(reader)
+            for row in reader:
+                img_path = osp.join(self.train_dir, str(row[1]))
+                class_map[img_path] = row[3]  # 'Class' column
+        return class_map
+
     def _process_dir(self, dir_path, relabel=False):
         xml_dir = osp.join(self.dataset_dir, 'train.csv')
         xml_file = self._readCSV_(xml_dir)

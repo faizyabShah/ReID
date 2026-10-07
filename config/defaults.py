@@ -137,6 +137,10 @@ _C.INPUT.STOCHASTIC_AUG.PROB_ONE = 0.45
 _C.INPUT.STOCHASTIC_AUG.PROB_TWO = 0.40
 # Class-specific augmentation
 _C.INPUT.ENABLE_CLASS_SPECIFIC_AUG = False  # faizyab/class-specific-augmentations (branch default: True)
+# Class-wise augmentation (narmyn/class-wise-aug)
+_C.INPUT.CLASS_SPECIFIC_AUG = CN()
+_C.INPUT.CLASS_SPECIFIC_AUG.ENABLED = False
+
 
 # -----------------------------------------------------------------------------
 # Dataset
