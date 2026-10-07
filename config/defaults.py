@@ -118,6 +118,12 @@ _C.INPUT.LGT.PROB = 0.2
 _C.INPUT.RPT = CN()
 _C.INPUT.RPT.ENABLED = False
 _C.INPUT.RPT.PROB = 0.5
+# Stochastic Augmentation (Díaz Benito et al., ICIPW 2025)
+_C.INPUT.STOCHASTIC_AUG = CN()
+_C.INPUT.STOCHASTIC_AUG.ENABLED = False
+_C.INPUT.STOCHASTIC_AUG.PROB_NONE = 0.15
+_C.INPUT.STOCHASTIC_AUG.PROB_ONE = 0.45
+_C.INPUT.STOCHASTIC_AUG.PROB_TWO = 0.40
 
 # -----------------------------------------------------------------------------
 # Dataset
