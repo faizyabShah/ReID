@@ -258,6 +258,11 @@ _C.TEST.RESAMPLE_TTA = False
 # Subtract the per-camera mean feature from query / gallery features and re-normalise
 _C.TEST.CAM_FEAT_NORM = False
 
+# Traffic-sign prototype / sign-type soft filter (narmyn/trafficsignprototype); uses
+# sign_type_prototypes.pkl, query_sign_types.csv, test_sign_types.csv (cwd or DATASETS.ROOT_DIR)
+# or the --prototype_bank / --query_sign_types / --gallery_sign_types arguments
+_C.TEST.SIGN_PROTOTYPE_FILTER = False
+
 # Name for saving the distmat after testing.
 _C.TEST.DIST_MAT = "dist_mat.npy"
 # Whether calculate the eval score option: 'True', 'False'
