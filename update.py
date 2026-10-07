@@ -3,6 +3,8 @@ import csv
 import torch
 import torch.nn.functional as F
 import argparse
+from itertools import combinations
+from collections import defaultdict
 import torch.nn as nn
 
 import numpy as np
@@ -445,6 +447,98 @@ def run_split_model(model, cfg, query_records, gallery_records, class_name):
     indices = np.argsort(re_rank_dist, axis=1)[:, :100]
 
     return {record['image_name']: indices[row_idx] + 1 for row_idx, record in enumerate(selected_queries)}
+
+
+# ---------------------------------------------------------------------------
+# narmyn/vitlarge16 (update2.py): Query Majority Voting
+# ---------------------------------------------------------------------------
+def find_adjacent_query_pairs(query_image_paths, match_threshold=50, orb_features=500):
+    """
+    Uses ORB feature matching to find pairs of query images
+    that are likely adjacent frames of the same object.
+    Returns list of (idx_a, idx_b) pairs.
+    """
+    import cv2
+    orb = cv2.ORB_create(nfeatures=orb_features)
+    bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+
+    descriptors = []
+    for path in query_image_paths:
+        img = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
+        _, des = orb.detectAndCompute(img, None)
+        descriptors.append(des)
+
+    adjacent_pairs = []
+    for i, j in combinations(range(len(query_image_paths)), 2):
+        if descriptors[i] is None or descriptors[j] is None:
+            continue
+        matches = bf.match(descriptors[i], descriptors[j])
+        if len(matches) >= match_threshold:
+            adjacent_pairs.append((i, j))
+
+    print(f"Found {len(adjacent_pairs)} adjacent query pairs")
+    return adjacent_pairs
+
+
+def build_query_groups(adjacent_pairs, num_queries):
+    """
+    Uses union-find to group transitively connected adjacent frames.
+    e.g. if A-B and B-C are pairs, group = {A, B, C}
+    """
+    parent = list(range(num_queries))
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(x, y):
+        parent[find(x)] = find(y)
+
+    for i, j in adjacent_pairs:
+        union(i, j)
+
+    groups = defaultdict(list)
+    for idx in range(num_queries):
+        groups[find(idx)].append(idx)
+
+    multi_groups = [g for g in groups.values() if len(g) > 1]
+    singleton_groups = [g for g in groups.values() if len(g) == 1]
+
+    print(f"Multi-frame groups: {len(multi_groups)}")
+    print(f"Singleton queries:  {len(singleton_groups)}")
+    return multi_groups, singleton_groups
+
+
+def apply_qmv(score_mat, query_image_paths, match_threshold=50, top_k=100, decay=10.0, orb_features=500):
+    """
+    QMV pipeline. Returns final rankings for all queries.
+    score_mat: [Q, N] higher is better
+    """
+    num_queries, num_gallery = score_mat.shape
+
+    individual_rankings = np.argsort(score_mat, axis=1)[:, ::-1]
+
+    pairs = find_adjacent_query_pairs(query_image_paths, match_threshold, orb_features)
+    multi_groups, _ = build_query_groups(pairs, num_queries)
+
+    final_rankings = individual_rankings.copy()
+
+    for group in multi_groups:
+        gallery_scores = np.zeros(num_gallery, dtype=np.float32)
+        for query_idx in group:
+            ranked_indices = individual_rankings[query_idx]
+            top_indices = ranked_indices[:top_k]
+            for rank, gal_idx in enumerate(top_indices):
+                weight = float(np.exp(-rank / decay))
+                gallery_scores[gal_idx] += weight * score_mat[query_idx, gal_idx]
+
+        voted_ranking = np.argsort(gallery_scores)[::-1]
+        for query_idx in group:
+            final_rankings[query_idx] = voted_ranking
+
+    return final_rankings
 
 
 # ---------------------------------------------------------------------------
@@ -1002,7 +1096,19 @@ if __name__ == "__main__":
         if cfg.TEST.DO_CLASS_FILTER:
             re_rank_dist = apply_class_penalty(re_rank_dist, query_classes, gallery_classes)
 
-        indices = np.argsort(re_rank_dist, axis=1)[:, :100]
+        if cfg.TEST.QMV.ENABLED:
+            query_image_paths = [item[0] for item in val_loader.dataset.img_items[:num_query]]
+            score_mat = -re_rank_dist
+            indices = apply_qmv(
+                score_mat,
+                query_image_paths,
+                match_threshold=cfg.TEST.QMV.MATCH_THRESHOLD,
+                top_k=cfg.TEST.QMV.TOP_K,
+                decay=cfg.TEST.QMV.DECAY,
+                orb_features=cfg.TEST.QMV.ORB_FEATURES,
+            )[:, :100]
+        else:
+            indices = np.argsort(re_rank_dist, axis=1)[:, :100]
 
         m, n = indices.shape
         # # print('m: {}  n: {}'.format(m, n))

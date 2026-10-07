@@ -267,6 +267,14 @@ _C.TEST.CAM_FEAT_NORM = False
 # or the --prototype_bank / --query_sign_types / --gallery_sign_types arguments
 _C.TEST.SIGN_PROTOTYPE_FILTER = False
 
+# Query Majority Voting: ORB-matched adjacent query frames share one voted ranking (narmyn/vitlarge16)
+_C.TEST.QMV = CN()
+_C.TEST.QMV.ENABLED = False
+_C.TEST.QMV.MATCH_THRESHOLD = 50
+_C.TEST.QMV.TOP_K = 100
+_C.TEST.QMV.DECAY = 10.0
+_C.TEST.QMV.ORB_FEATURES = 500
+
 # Name for saving the distmat after testing.
 _C.TEST.DIST_MAT = "dist_mat.npy"
 # Whether calculate the eval score option: 'True', 'False'
