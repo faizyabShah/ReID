@@ -138,7 +138,7 @@ def apply_class_based_reranking(q_g_dist, q_q_dist, g_g_dist, query_classes, gal
     return final_dist
 
 def extract_feature(model, dataloaders, num_query, last_k=6, use_part_tokens=False, part_tokens_last=1,
-                    scales=None, combine_method='avg'):
+                    scales=None, combine_method='avg', resample_tta=False):
     """Extract features with CLS fusion (concat of last K layers' CLS tokens) plus flip TTA.
 
     If use_part_tokens is True, concatenates the 3 part tokens (positions 1:4) from
@@ -148,6 +148,9 @@ def extract_feature(model, dataloaders, num_query, last_k=6, use_part_tokens=Fal
     scale multipliers relative to the input size (e.g. [1.0, 0.9, 1.1]); every
     scaled image and its horizontal flip are embedded and combined with
     `combine_method` 'avg' (default) or 'max'.
+
+    Resample TTA (narmyn/moreposthocthings): with `resample_tta`, each view is
+    also up-sampled by 1.1 and resized back to its input size.
     """
     features = []
     camids = []
@@ -157,6 +160,7 @@ def extract_feature(model, dataloaders, num_query, last_k=6, use_part_tokens=Fal
     # default scales fallback
     if scales is None:
         scales = getattr(cfg.TEST, 'SCALES', None) or [1.0]
+    resample_scales = [1.0, 1.1] if resample_tta else [1.0]
 
     for data in dataloaders:
         img = data['images']
@@ -175,38 +179,46 @@ def extract_feature(model, dataloaders, num_query, last_k=6, use_part_tokens=Fal
                 new_w = max(1, int(round(w * scale)))
                 scaled = F.interpolate(img, size=(new_h, new_w), mode='bilinear', align_corners=False)
 
-            for flip_i in range(2):
-                input_img = scaled.cuda()
-                if flip_i == 1:
-                    input_img = torch.flip(input_img, dims=[-1])
+            for resample in resample_scales:
+                for flip_i in range(2):
+                    input_img = scaled.cuda()
+                    if resample != 1.0:
+                        input_img = torch.nn.functional.interpolate(
+                            input_img, scale_factor=resample, mode='bilinear', align_corners=False
+                        )
+                        input_img = torch.nn.functional.interpolate(
+                            input_img, size=scaled.shape[-2:], mode='bilinear', align_corners=False
+                        )
+                    if flip_i == 1:
+                        input_img = torch.flip(input_img, dims=[-1])
 
-                layerwise_tokens = backbone(input_img)
-                cls_tokens = torch.stack([layer[:, 0] for layer in layerwise_tokens[-last_k:]], dim=1)
-                f = cls_tokens.reshape(n, -1)
-                if use_part_tokens:
-                    part_tokens = torch.cat(
-                        [layer[:, 1:4].reshape(n, -1) for layer in layerwise_tokens[-part_tokens_last:]],
-                        dim=1,
-                    )
-                    f = torch.cat([f, part_tokens], dim=1)
-                f = f.float()
+                    layerwise_tokens = backbone(input_img)
+                    cls_tokens = torch.stack([layer[:, 0] for layer in layerwise_tokens[-last_k:]], dim=1)
+                    f = cls_tokens.reshape(n, -1)
+                    if use_part_tokens:
+                        part_tokens = torch.cat(
+                            [layer[:, 1:4].reshape(n, -1) for layer in layerwise_tokens[-part_tokens_last:]],
+                            dim=1,
+                        )
+                        f = torch.cat([f, part_tokens], dim=1)
+                    f = f.float()
 
-                if agg_feats is None:
-                    agg_feats = torch.zeros(n, f.shape[1], device=f.device)
+                    if agg_feats is None:
+                        agg_feats = torch.zeros(n, f.shape[1], device=f.device)
 
-                if combine_method == 'avg':
-                    agg_feats = agg_feats + f
-                elif combine_method == 'max':
-                    max_feats.append(f)
-                else:
-                    agg_feats = agg_feats + f
+                    if combine_method == 'avg':
+                        agg_feats = agg_feats + f
+                    elif combine_method == 'max':
+                        max_feats.append(f)
+                    else:
+                        agg_feats = agg_feats + f
 
         if combine_method == 'avg':
-            ff = agg_feats / (len(scales) * 2)
+            ff = agg_feats / (len(scales) * len(resample_scales) * 2)
         elif combine_method == 'max':
             ff = torch.stack(max_feats, dim=0).max(dim=0)[0]
         else:
-            ff = agg_feats / (len(scales) * 2)
+            ff = agg_feats / (len(scales) * len(resample_scales) * 2)
 
         fnorm = torch.norm(ff, p=2, dim=1, keepdim=True)
         ff = ff.div(fnorm.expand_as(ff))
@@ -307,7 +319,8 @@ def run_split_model(model, cfg, query_records, gallery_records, class_name):
     qf, gf, _, _ = extract_feature(model, loader, len(selected_queries), last_k=last_k,
                                    use_part_tokens=cfg.TEST.USE_PART_TOKENS,
                                    part_tokens_last=cfg.TEST.PART_TOKENS_LAST,
-                                   scales=cfg.TEST.SCALES, combine_method=cfg.TEST.SCALE_COMBINE)
+                                   scales=cfg.TEST.SCALES, combine_method=cfg.TEST.SCALE_COMBINE,
+                                   resample_tta=cfg.TEST.RESAMPLE_TTA)
     qf = qf.cpu().numpy()
     gf = gf.cpu().numpy()
     q_g_dist = np.dot(qf, np.transpose(gf))
@@ -731,6 +744,7 @@ if __name__ == "__main__":
                 part_tokens_last=cfg.TEST.PART_TOKENS_LAST,
                 scales=cfg.TEST.SCALES,
                 combine_method=cfg.TEST.SCALE_COMBINE,
+                resample_tta=cfg.TEST.RESAMPLE_TTA,
             )
 
         # save feature
@@ -738,6 +752,22 @@ if __name__ == "__main__":
         gf=gf.cpu().numpy()
         np.save("./qf.npy", qf)
         np.save("./gf.npy", gf)
+
+        if cfg.TEST.CAM_FEAT_NORM:
+            # Camera feature normalization (narmyn/moreposthocthings)
+            print("[cam_norm] Normalizing features per camera...")
+            for cam_id in np.unique(q_camids):
+                mask = q_camids == cam_id
+                centroid = qf[mask].mean(axis=0)
+                qf[mask] = qf[mask] - centroid
+            for cam_id in np.unique(g_camids):
+                mask = g_camids == cam_id
+                centroid = gf[mask].mean(axis=0)
+                gf[mask] = gf[mask] - centroid
+
+            # Re-normalize after subtraction
+            qf = qf / (np.linalg.norm(qf, axis=1, keepdims=True) + 1e-12)
+            gf = gf / (np.linalg.norm(gf, axis=1, keepdims=True) + 1e-12)
 
         q_g_dist = np.dot(qf, np.transpose(gf))
         q_q_dist = np.dot(qf, np.transpose(qf))

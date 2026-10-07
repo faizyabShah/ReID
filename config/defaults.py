@@ -253,6 +253,11 @@ _C.TEST.SCALE_COMBINE = 'avg'
 # Master switch to explicitly enable multi-scale testing (keeps default off).
 _C.TEST.DO_MULTI_SCALE = False
 
+# Resample TTA: also embed each view up-sampled x1.1 and resized back (narmyn/moreposthocthings)
+_C.TEST.RESAMPLE_TTA = False
+# Subtract the per-camera mean feature from query / gallery features and re-normalise
+_C.TEST.CAM_FEAT_NORM = False
+
 # Name for saving the distmat after testing.
 _C.TEST.DIST_MAT = "dist_mat.npy"
 # Whether calculate the eval score option: 'True', 'False'
