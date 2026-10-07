@@ -1,6 +1,7 @@
 import os
 import csv
 import torch
+import torch.nn.functional as F
 import argparse
 
 import numpy as np
@@ -134,16 +135,26 @@ def apply_class_based_reranking(q_g_dist, q_q_dist, g_g_dist, query_classes, gal
 
     return final_dist
 
-def extract_feature(model, dataloaders, num_query, last_k=6, use_part_tokens=False, part_tokens_last=1):
+def extract_feature(model, dataloaders, num_query, last_k=6, use_part_tokens=False, part_tokens_last=1,
+                    scales=None, combine_method='avg'):
     """Extract features with CLS fusion (concat of last K layers' CLS tokens) plus flip TTA.
 
     If use_part_tokens is True, concatenates the 3 part tokens (positions 1:4) from
     the last `part_tokens_last` layers onto the fused CLS feature.
+
+    Multi-resolution TTA (faizyab/post-hoc-multi-res): `scales` is a list of
+    scale multipliers relative to the input size (e.g. [1.0, 0.9, 1.1]); every
+    scaled image and its horizontal flip are embedded and combined with
+    `combine_method` 'avg' (default) or 'max'.
     """
     features = []
     camids = []
     count = 0
     backbone = model.base
+
+    # default scales fallback
+    if scales is None:
+        scales = getattr(cfg.TEST, 'SCALES', None) or [1.0]
 
     for data in dataloaders:
         img = data['images']
@@ -151,29 +162,55 @@ def extract_feature(model, dataloaders, num_query, last_k=6, use_part_tokens=Fal
         n, c, h, w = img.size()
         count += n
 
-        ff = None
-        for i in range(2):
-            input_img = img.cuda()
-            if i == 1:
-                input_img = torch.flip(input_img, dims=[-1])
-            layerwise_tokens = backbone(input_img)
-            cls_tokens = torch.stack([layer[:, 0] for layer in layerwise_tokens[-last_k:]], dim=1)
-            f = cls_tokens.reshape(n, -1)
-            if use_part_tokens:
-                part_tokens = torch.cat(
-                    [layer[:, 1:4].reshape(n, -1) for layer in layerwise_tokens[-part_tokens_last:]],
-                    dim=1,
-                )
-                f = torch.cat([f, part_tokens], dim=1)
-            f = f.float()
-            if ff is None:
-                ff = torch.zeros(n, f.shape[1], device=f.device)
-            ff = ff + f
+        agg_feats = None
+        max_feats = []
+
+        for scale in scales:
+            if scale == 1.0:
+                scaled = img
+            else:
+                new_h = max(1, int(round(h * scale)))
+                new_w = max(1, int(round(w * scale)))
+                scaled = F.interpolate(img, size=(new_h, new_w), mode='bilinear', align_corners=False)
+
+            for flip_i in range(2):
+                input_img = scaled.cuda()
+                if flip_i == 1:
+                    input_img = torch.flip(input_img, dims=[-1])
+
+                layerwise_tokens = backbone(input_img)
+                cls_tokens = torch.stack([layer[:, 0] for layer in layerwise_tokens[-last_k:]], dim=1)
+                f = cls_tokens.reshape(n, -1)
+                if use_part_tokens:
+                    part_tokens = torch.cat(
+                        [layer[:, 1:4].reshape(n, -1) for layer in layerwise_tokens[-part_tokens_last:]],
+                        dim=1,
+                    )
+                    f = torch.cat([f, part_tokens], dim=1)
+                f = f.float()
+
+                if agg_feats is None:
+                    agg_feats = torch.zeros(n, f.shape[1], device=f.device)
+
+                if combine_method == 'avg':
+                    agg_feats = agg_feats + f
+                elif combine_method == 'max':
+                    max_feats.append(f)
+                else:
+                    agg_feats = agg_feats + f
+
+        if combine_method == 'avg':
+            ff = agg_feats / (len(scales) * 2)
+        elif combine_method == 'max':
+            ff = torch.stack(max_feats, dim=0).max(dim=0)[0]
+        else:
+            ff = agg_feats / (len(scales) * 2)
 
         fnorm = torch.norm(ff, p=2, dim=1, keepdim=True)
         ff = ff.div(fnorm.expand_as(ff))
         features.append(ff)
         camids.extend(np.asarray(camid))
+
     features = torch.cat(features, 0)
     camids = np.array(camids)
 
@@ -267,7 +304,8 @@ def run_split_model(model, cfg, query_records, gallery_records, class_name):
     last_k = cfg.TEST.CLS_FUSION_LAST if cfg.TEST.CLS_FUSION else 1
     qf, gf, _, _ = extract_feature(model, loader, len(selected_queries), last_k=last_k,
                                    use_part_tokens=cfg.TEST.USE_PART_TOKENS,
-                                   part_tokens_last=cfg.TEST.PART_TOKENS_LAST)
+                                   part_tokens_last=cfg.TEST.PART_TOKENS_LAST,
+                                   scales=cfg.TEST.SCALES, combine_method=cfg.TEST.SCALE_COMBINE)
     qf = qf.cpu().numpy()
     gf = gf.cpu().numpy()
     q_g_dist = np.dot(qf, np.transpose(gf))
@@ -375,6 +413,8 @@ if __name__ == "__main__":
                 last_k=last_k,
                 use_part_tokens=cfg.TEST.USE_PART_TOKENS,
                 part_tokens_last=cfg.TEST.PART_TOKENS_LAST,
+                scales=cfg.TEST.SCALES,
+                combine_method=cfg.TEST.SCALE_COMBINE,
             )
 
         # save feature
