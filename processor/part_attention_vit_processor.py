@@ -22,7 +22,8 @@ def part_attention_vit_do_train_with_amp(cfg,
              loss_fn,
              num_query, local_rank,
              patch_centers = None,
-             pc_criterion= None):
+             pc_criterion= None,
+             log_name=None):
     log_period = cfg.SOLVER.LOG_PERIOD
     checkpoint_period = cfg.SOLVER.CHECKPOINT_PERIOD
     eval_period = cfg.SOLVER.EVAL_PERIOD
@@ -32,7 +33,8 @@ def part_attention_vit_do_train_with_amp(cfg,
 
     logger = logging.getLogger("PAT.train")
     logger.info('start training')
-    tb_path = os.path.join(cfg.TB_LOG_ROOT, cfg.LOG_NAME)
+    log_name = log_name or cfg.LOG_NAME
+    tb_path = os.path.join(cfg.TB_LOG_ROOT, log_name)
     tbWriter = SummaryWriter(tb_path)
     print("saving tblog to {}".format(tb_path))
     
@@ -72,6 +74,7 @@ def part_attention_vit_do_train_with_amp(cfg,
     
     best_mAP = 0.0
     best_index = 1
+    mAP = 0.0
     for epoch in range(1, epochs + 1):
         start_time = time.time()
         total_loss_meter.reset()
@@ -157,7 +160,7 @@ def part_attention_vit_do_train_with_amp(cfg,
         else:
             logger.info("Epoch {} done. Time per batch: {:.3f}[s] Speed: {:.1f}[samples/s]".format(epoch, time_per_batch, cfg.SOLVER.IMS_PER_BATCH / time_per_batch))
 
-        log_path = os.path.join(cfg.LOG_ROOT, cfg.LOG_NAME)
+        log_path = os.path.join(cfg.LOG_ROOT, log_name)
         
         if epoch % eval_period == 0:
             if cfg.MODEL.DIST_TRAIN:

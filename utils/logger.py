@@ -5,6 +5,7 @@ import os.path as osp
 def setup_logger(name, save_dir, if_train):
     logger = logging.getLogger(name)
     logger.setLevel(logging.DEBUG)
+    logger.handlers.clear()
 
     ch = logging.StreamHandler(stream=sys.stdout)
     ch.setLevel(logging.DEBUG)

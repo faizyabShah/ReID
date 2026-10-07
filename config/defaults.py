@@ -74,6 +74,10 @@ _C.MODEL.CLUSTER_K = 10 # num of clusters
 _C.MODEL.SOFT_WEIGHT = 0.5
 _C.MODEL.SOFT_LAMBDA = 0.5
 
+# Split training into a traffic-only model and a non-traffic model.
+_C.MODEL.CLASS_SPLIT_MODE = 'all'  # options: 'all', 'traffic', 'non_traffic', 'dual'
+_C.MODEL.TRAFFIC_CLASS_NAME = 'traffic'
+
 #-----------------------------------------------------------------------------
 # INPUT
 # -----------------------------------------------------------------------------
@@ -237,6 +241,11 @@ _C.TEST.EVAL = False
 # Concatenate CLS tokens from last K blocks at inference
 _C.TEST.CLS_FUSION = False
 _C.TEST.CLS_FUSION_LAST = 6
+
+# Dual-model inference weights. When both are set, the inference scripts route
+# traffic queries to TEST.TRAFFIC_WEIGHT and all other queries to TEST.OTHER_WEIGHT.
+_C.TEST.TRAFFIC_WEIGHT = ''
+_C.TEST.OTHER_WEIGHT = ''
 
 #class filtering
 _C.TEST.DO_CLASS_FILTER = False

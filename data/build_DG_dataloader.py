@@ -1,4 +1,5 @@
 import os
+import logging
 import torch
 import sys
 import collections.abc as container_abcs
@@ -10,6 +11,8 @@ from torch.utils.data import DataLoader
 from utils import comm
 import random
 
+from utils.class_split import attach_class_info, normalize_class_name, read_class_map, split_records_by_class
+
 from . import samplers
 from .common import CommDataset
 from .datasets import DATASET_REGISTRY
@@ -18,7 +21,29 @@ from .transforms import build_transforms
 _root = os.getenv("REID_DATASETS", "../../data")
 
 
-def build_reid_train_loader(cfg):
+def _class_mode_to_filter(class_mode):
+    if class_mode is None:
+        return None
+    mode = normalize_class_name(class_mode)
+    if mode in {"all", "any", "none", ""}:
+        return None
+    if mode in {"traffic", "nontraffic", "other", "non_traffic"}:
+        return mode
+    return mode
+
+
+def _matches_class_mode(class_name, class_mode):
+    if class_mode is None:
+        return True
+    normalized = normalize_class_name(class_name)
+    if class_mode == "traffic":
+        return normalized == "traffic"
+    if class_mode in {"nontraffic", "other", "non_traffic"}:
+        return normalized != "traffic"
+    return True
+
+
+def build_reid_train_loader(cfg, class_mode=None):
     gettrace = getattr(sys, 'gettrace', None)
     if gettrace():
         print('*'*100)
@@ -33,38 +58,9 @@ def build_reid_train_loader(cfg):
     domain_idx = 0
     camera_all = list()
 
-    # try to read a train_classes.csv mapping (cameraID,imageName,pid,Class)
-    train_classes_map = {}
-    class_to_idx = {}
-    class_idx_counter = 0
     _root = cfg.DATASETS.ROOT_DIR
     classes_path = os.path.join(_root, 'train_classes.csv')
-    def _norm_class_name(s: str) -> str:
-        key = "".join(ch.lower() for ch in s.strip() if ch.isalnum())
-        if key in {"container", "containers"}:
-            return "Container"
-        if key in {"rubbishbins", "rubbishbin", "trashbin", "trashbins", "bin", "bins", "wastebin", "wastebins"}:
-            return "RubbishBins"
-        if key in {"crosswalk", "crosswalks", "zebracrossing", "zebracrosswalk"}:
-            return "Crosswalk"
-        if key in {"trafficsign", "trafficsigns", "trafficsignal", "trafficsignals", "roadsign", "roadsigns"}:
-            return "TrafficSign"
-        return s.strip()
-    if os.path.exists(classes_path):
-        try:
-            import csv as _csv
-            with open(classes_path, newline='') as cf:
-                r = _csv.reader(cf)
-                header = next(r, None)
-                for cam, img, pid, cls in r:
-                    cls_n = _norm_class_name(cls)
-                    key = img.strip()
-                    if cls_n not in class_to_idx:
-                        class_to_idx[cls_n] = class_idx_counter
-                        class_idx_counter += 1
-                    train_classes_map[key] = class_to_idx[cls_n]
-        except Exception:
-            train_classes_map = {}
+    train_classes_map = read_class_map(classes_path)
 
     # load datasets
     for d in cfg.DATASETS.TRAIN:
@@ -72,8 +68,6 @@ def build_reid_train_loader(cfg):
             dataset = DATASET_REGISTRY.get('CUHK03')(root=_root, cuhk03_labeled=False)
         else:
             dataset = DATASET_REGISTRY.get(d)(root=_root, combineall=cfg.DATASETS.COMBINEALL)
-        if comm.is_main_process():
-            dataset.show_train()
         # Ensure every train item has an add_info dict at index 3 with 'domains' and optional 'class'
         for i, item in enumerate(dataset.train):
             add_info = {}
@@ -84,25 +78,24 @@ def build_reid_train_loader(cfg):
                 add_info['domains'] = int(domain_idx)
 
             # attempt to attach class id (if available in train_classes.csv)
-            try:
-                img_path = dataset.train[i][1]
-                # imageName in train_classes.csv may include prefixes like 'urban/0001.jpg'
-                # we try full, then basename
-                cls_id = None
-                if img_path in train_classes_map:
-                    cls_id = train_classes_map[img_path]
-                else:
-                    img_basename = os.path.basename(img_path)
-                    if img_basename in train_classes_map:
-                        cls_id = train_classes_map[img_basename]
-                if cls_id is not None:
-                    add_info['class'] = int(cls_id)
-            except Exception:
-                pass
+            img_path = dataset.train[i][0]
+            cls_name = train_classes_map.get(img_path, train_classes_map.get(os.path.basename(img_path)))
+            if cls_name is not None:
+                add_info['class_name'] = cls_name
 
             dataset.train[i] = list(dataset.train[i])
             dataset.train[i].append(add_info)
             dataset.train[i] = tuple(dataset.train[i])
+        if class_mode is not None:
+            train_filtered = []
+            for item in dataset.train:
+                class_name = item[3].get('class_name') if len(item) > 3 else None
+                if _matches_class_mode(class_name, class_mode):
+                    train_filtered.append(item)
+            dataset.train = train_filtered
+            dataset.num_train_pids = dataset.get_num_pids(dataset.train)
+        if comm.is_main_process():
+            dataset.show_train()
         domain_idx += 1
         train_items.extend(dataset.train)
 
@@ -122,7 +115,7 @@ def build_reid_train_loader(cfg):
     return train_loader
 
 
-def build_reid_test_loader(cfg, dataset_name, opt=None, flag_test=True, shuffle=False, only_gallery=False, only_query=False, eval_time=False):
+def build_reid_test_loader(cfg, dataset_name, opt=None, flag_test=True, shuffle=False, only_gallery=False, only_query=False, eval_time=False, class_mode=None):
     test_transforms = build_transforms(cfg, is_train=False)
     _root = cfg.DATASETS.ROOT_DIR
     if opt is None:
@@ -134,6 +127,9 @@ def build_reid_test_loader(cfg, dataset_name, opt=None, flag_test=True, shuffle=
                 dataset.show_train()
     else:
         dataset = DATASET_REGISTRY.get(dataset_name)(root=[_root, opt])
+    query_class_map = read_class_map(os.path.join(_root, 'query_classes.csv'))
+    gallery_class_map = read_class_map(os.path.join(_root, 'test_classes.csv'))
+
     if flag_test:
         if only_gallery:
             test_items = dataset.gallery
@@ -146,6 +142,53 @@ def build_reid_test_loader(cfg, dataset_name, opt=None, flag_test=True, shuffle=
             random.shuffle(test_items)
     else:
         test_items = dataset.train
+
+    # Class annotation / filtering of test items is only used by the class-split experiment
+    # (faizyab/traffic-class-things); the default path keeps the plain (img, pid, camid) items.
+    if flag_test and _class_mode_to_filter(class_mode) is not None:
+        annotated_items = []
+        for item in test_items:
+            image_path = item[0]
+            image_name = os.path.basename(image_path)
+            class_name = query_class_map.get(image_name)
+            if class_name is None:
+                class_name = query_class_map.get(image_path)
+            if class_name is None:
+                class_name = gallery_class_map.get(image_name)
+            if class_name is None:
+                class_name = gallery_class_map.get(image_path)
+            annotated_items.append(attach_class_info(item, class_name))
+        test_items = annotated_items
+
+        filter_mode = _class_mode_to_filter(class_mode)
+        if filter_mode is not None:
+            if filter_mode == 'traffic':
+                test_items = split_records_by_class(test_items, 'traffic')
+            elif filter_mode in {'nontraffic', 'non_traffic', 'other'}:
+                test_items = [item for item in test_items if item[3].get('class_name') != 'traffic']
+            else:
+                test_items = [item for item in test_items if _matches_class_mode(item[3].get('class_name'), filter_mode)]
+        if comm.is_main_process():
+            num_query_items = len(dataset.query)
+            num_gallery_items = len(dataset.gallery)
+            if only_gallery:
+                num_query_items = 0
+                num_gallery_items = len(test_items)
+            elif only_query:
+                num_query_items = len(test_items)
+                num_gallery_items = 0
+            else:
+                if class_mode is not None:
+                    num_query_items = len([item for item in test_items if item[3].get('q_or_g') == 'query'])
+                    num_gallery_items = len([item for item in test_items if item[3].get('q_or_g') == 'gallery'])
+            logger = logging.getLogger('PAT')
+            logger.info('=> Loaded {}'.format(dataset.__class__.__name__))
+            logger.info('  ----------------------------------------')
+            logger.info('  subset   | # ids | # images | # cameras')
+            logger.info('  ----------------------------------------')
+            logger.info('  query    | {:5d} | {:8d} | {:9d}'.format(len(set([item[1] for item in test_items[:num_query_items]])), num_query_items, len(set([item[2] for item in test_items[:num_query_items]])) if num_query_items else 0))
+            logger.info('  gallery  | {:5d} | {:8d} | {:9d}'.format(len(set([item[1] for item in test_items[num_query_items:num_query_items+num_gallery_items]])), num_gallery_items, len(set([item[2] for item in test_items[num_query_items:num_query_items+num_gallery_items]])) if num_gallery_items else 0))
+            logger.info('  ----------------------------------------')
 
     test_set = CommDataset(test_items, test_transforms, relabel=False)
 

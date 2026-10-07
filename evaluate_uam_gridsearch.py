@@ -16,6 +16,7 @@ from data.common import CommDataset
 from data.transforms.build import build_transforms
 from model import make_model
 from update import apply_caj, normalize_class_name
+from utils.class_split import is_traffic_class
 from utils.logger import setup_logger
 from utils.re_ranking import re_ranking
 
@@ -129,6 +130,116 @@ def extract_layerwise_cls_tokens(model, loader, device):
         camids.extend(np.asarray(batch["camid"]))
 
     return torch.cat(batch_tokens, dim=0), np.asarray(pids), np.asarray(camids)
+
+
+def extract_layerwise_cls_tokens_dual_model(traffic_model, other_model, cfg, root_dir, 
+                                           query_records, gallery_records,
+                                           query_classes, gallery_classes, device):
+    """Extract layerwise CLS tokens using dual models (traffic and non-traffic).
+    
+    Routes query/gallery items to the appropriate model based on class.
+    """
+    logger = setup_logger("UAM_GRIDSEARCH", "", if_train=False)
+    
+    # Build separate loaders for traffic and non-traffic queries
+    traffic_query_indices = []
+    other_query_indices = []
+    
+    for idx, (query_record, query_class) in enumerate(zip(query_records, query_classes)):
+        if is_traffic_class(query_class):
+            traffic_query_indices.append(idx)
+        else:
+            other_query_indices.append(idx)
+    
+    # Build items for each model (its queries + all gallery items)
+    traffic_items = []
+    other_items = []
+    
+    # Add traffic queries
+    for idx in traffic_query_indices:
+        record = query_records[idx]
+        traffic_items.append((
+            resolve_image_path(root_dir, "image_query", record["image_name"]),
+            record["pid"],
+            record["camid"],
+        ))
+    
+    # Add non-traffic queries
+    for idx in other_query_indices:
+        record = query_records[idx]
+        other_items.append((
+            resolve_image_path(root_dir, "image_query", record["image_name"]),
+            record["pid"],
+            record["camid"],
+        ))
+    
+    # Add gallery items to both
+    gallery_items = [
+        (
+            resolve_image_path(root_dir, "image_test", record["image_name"]),
+            record["pid"],
+            record["camid"],
+        )
+        for record in gallery_records
+    ]
+    
+    traffic_items.extend(gallery_items)
+    other_items.extend(gallery_items)
+    
+    # Extract features
+    num_traffic_queries = len(traffic_query_indices)
+    num_other_queries = len(other_query_indices)
+    num_gallery = len(gallery_records)
+    
+    logger.info(f"Extracting features: {num_traffic_queries} traffic queries, {num_other_queries} non-traffic queries, {num_gallery} gallery")
+    
+    if num_traffic_queries > 0:
+        traffic_loader = build_loader(cfg, traffic_items)
+        with torch.no_grad():
+            traffic_tokens, _, _ = extract_layerwise_cls_tokens(traffic_model, traffic_loader, device)
+    else:
+        traffic_tokens = torch.empty(0, 0)
+    
+    if num_other_queries > 0:
+        other_loader = build_loader(cfg, other_items)
+        with torch.no_grad():
+            other_tokens, _, _ = extract_layerwise_cls_tokens(other_model, other_loader, device)
+    else:
+        other_tokens = torch.empty(0, 0)
+    
+    # Merge tokens back in original order
+    total_items = len(query_records) + len(gallery_records)
+    
+    # Determine token shape from non-empty tensors
+    if num_traffic_queries > 0:
+        token_shape = traffic_tokens.shape[1:]
+    else:
+        token_shape = other_tokens.shape[1:]
+    
+    merged_tokens = torch.zeros(total_items, *token_shape)
+    
+    # Extract gallery tokens (same across both models, use from whichever is available)
+    if num_traffic_queries > 0:
+        gallery_start_traffic = num_traffic_queries
+        gallery_end_traffic = num_traffic_queries + num_gallery
+        merged_tokens[len(query_records):] = traffic_tokens[gallery_start_traffic:gallery_end_traffic]
+    else:
+        gallery_start_other = num_other_queries
+        gallery_end_other = num_other_queries + num_gallery
+        merged_tokens[len(query_records):] = other_tokens[gallery_start_other:gallery_end_other]
+    
+    # Extract and place query tokens
+    traffic_token_idx = 0
+    other_token_idx = 0
+    for orig_idx in range(len(query_records)):
+        if orig_idx in traffic_query_indices:
+            merged_tokens[orig_idx] = traffic_tokens[traffic_token_idx]
+            traffic_token_idx += 1
+        else:
+            merged_tokens[orig_idx] = other_tokens[other_token_idx]
+            other_token_idx += 1
+    
+    return merged_tokens
 
 
 def fuse_last_k_cls_tokens(layerwise_cls_tokens, last_k):
@@ -414,17 +525,65 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     os.environ["CUDA_VISIBLE_DEVICES"] = cfg.MODEL.DEVICE_ID
 
-    model = make_model(cfg, cfg.MODEL.NAME, 0, 0, 0)
-    model.load_param(cfg.TEST.WEIGHT)
-    if torch.cuda.device_count() > 1 and device == "cuda":
-        model = torch.nn.DataParallel(model)
-    model.to(device)
-    model.eval()
+    # Check for dual-model mode
+    traffic_weight = cfg.TEST.TRAFFIC_WEIGHT
+    other_weight = cfg.TEST.OTHER_WEIGHT
+    dual_mode = bool(traffic_weight and other_weight)
 
-    with torch.no_grad():
-        layerwise_cls_tokens, pids, camids = extract_layerwise_cls_tokens(model, test_loader, device)
+    if dual_mode:
+        logger.info("Running in DUAL-MODEL mode")
+        traffic_model = make_model(cfg, cfg.MODEL.NAME, 0, 0, 0)
+        traffic_model.load_param(traffic_weight)
+        if torch.cuda.device_count() > 1 and device == "cuda":
+            traffic_model = torch.nn.DataParallel(traffic_model)
+        traffic_model.to(device)
+        traffic_model.eval()
+        
+        other_model = make_model(cfg, cfg.MODEL.NAME, 0, 0, 0)
+        other_model.load_param(other_weight)
+        if torch.cuda.device_count() > 1 and device == "cuda":
+            other_model = torch.nn.DataParallel(other_model)
+        other_model.to(device)
+        other_model.eval()
+        
+        with torch.no_grad():
+            layerwise_cls_tokens = extract_layerwise_cls_tokens_dual_model(
+                traffic_model, other_model, cfg, root_dir,
+                query_records, gallery_records,
+                query_classes, gallery_classes, device
+            )
+        gallery_offset = len(query_records)
+    else:
+        logger.info("Running in SINGLE-MODEL mode")
+        model = make_model(cfg, cfg.MODEL.NAME, 0, 0, 0)
+        model.load_param(cfg.TEST.WEIGHT)
+        if torch.cuda.device_count() > 1 and device == "cuda":
+            model = torch.nn.DataParallel(model)
+        model.to(device)
+        model.eval()
 
-    if not np.array_equal(pids[:gallery_offset], query_pids):
+        test_items = [
+            (
+                resolve_image_path(root_dir, "image_query", record["image_name"]),
+                record["pid"],
+                record["camid"],
+            )
+            for record in query_records
+        ] + [
+            (
+                resolve_image_path(root_dir, "image_test", record["image_name"]),
+                record["pid"],
+                record["camid"],
+            )
+            for record in gallery_records
+        ]
+        test_loader = build_loader(cfg, test_items)
+        gallery_offset = len(query_records)
+
+        with torch.no_grad():
+            layerwise_cls_tokens, pids, camids = extract_layerwise_cls_tokens(model, test_loader, device)
+
+    if not dual_mode and not np.array_equal(pids[:gallery_offset], query_pids):
         logger.warning("Loaded query PIDs do not match query.csv order exactly; using CSV order for scoring.")
 
     k_grid = parse_int_list(args.k_grid)
